@@ -1,0 +1,87 @@
+PORTCULLIS
+Copyright 2026 Kaushik
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full text.
+
+================================================================================
+PRIOR ART AND METHODOLOGY ATTRIBUTION
+================================================================================
+
+This file exists to draw an explicit line between (a) established public
+techniques this project applies, which are not owned by anyone and are not the
+subject of any copyright or authorship claim here, and (b) this project's own
+original contribution: the specific architecture, rule corpus, DSL, and
+documentation, which are original expression authored for PORTCULLIS.
+
+Methods, algorithms and architectural patterns are not copyrightable subject
+matter in the first place (17 U.S.C. §102(b) and equivalent provisions
+elsewhere) — copyright protects the particular expression of an idea, not the
+idea itself. The attributions below are provided in that spirit: as a record
+of intellectual debt and good scholarly practice, not because attribution is
+legally required for using a public, decades-old technique.
+
+--------------------------------------------------------------------------------
+Techniques used, and their origin
+--------------------------------------------------------------------------------
+
+MinHash / locality-sensitive hashing for near-duplicate detection
+    Broder, A.Z. (1997). "On the resemblance and containment of documents."
+    Compression and Complexity of Sequences. Public, peer-reviewed technique
+    in general academic use for over two decades; used here (planned, M3) for
+    corpus deduplication prior to the family-disjoint split.
+
+Cascaded / staged classification with cost-ordered short-circuiting
+    General pattern in both classical ML (e.g. Viola & Jones, 2001, "Rapid
+    Object Detection using a Boosted Cascade of Simple Features") and modern
+    security tooling (WAFs, EDR pipelines). PORTCULLIS's specific five-layer
+    cascade (L0-L5), its layer boundaries, its per-layer contract, and its
+    fusion approach are this project's own design — see docs/adr/0001.
+
+Signature/rule engines over regular expressions with a small combinator DSL
+    General pattern shared by YARA, Sigma, and Semgrep, among others.
+    PORTCULLIS's specific DSL (`regex`/`all`/`any`/`not`/`near`), its rule
+    schema, and its 50-rule corpus in rules/ are original work authored for
+    this project — no rule text, pattern, or schema was copied from any of
+    the tools named above.
+
+Unicode NFKC normalisation, confusable-character folding, zero-width and
+bidirectional control stripping
+    NFKC is a published Unicode Consortium normalisation form (Unicode
+    Standard Annex #15). The confusables concept is documented in Unicode
+    Technical Standard #39. PORTCULLIS's confusables table
+    (packages/core/src/portcullis/core/l0/confusables.py) is a small,
+    hand-curated, independently authored subset — not a copy of the Unicode
+    Consortium's confusables.txt data file.
+
+Noisy-OR aggregation of independent weak signals into a bounded score
+    Standard technique in Bayesian probability and expert-systems literature;
+    no single origin, in general public use since at least the 1980s.
+
+Platt scaling / isotonic regression for probability calibration (planned, M4)
+    Platt, J. (1999); Zadrozny & Elkan (2002). Standard scikit-learn-supported
+    calibration methods, applied here to this project's own fusion output.
+
+--------------------------------------------------------------------------------
+Third-party datasets referenced (not vendored — see data/ manifests)
+--------------------------------------------------------------------------------
+
+Per ADR-0004, no raw third-party corpus is committed to this repository.
+Planned/referenced sources (hendzh/PromptShield, deepset/prompt-injections,
+jackhhao/jailbreak-classification) retain their own stated licences, credited
+in the dataset manifest and dataset card at ingestion time (Milestone 3).
+
+--------------------------------------------------------------------------------
+What this project claims as original work
+--------------------------------------------------------------------------------
+
+  - The specific L0-L5 cascade architecture and layer contracts (docs/adr/0001)
+  - The rule DSL grammar and its Python implementation (packages/core/.../l1)
+  - All 50 rules in rules/*.yaml, their patterns, and their test cases
+  - The L0 normalisation pipeline implementation and its confusables table
+  - The threat model, ADRs, and all prose documentation in docs/
+  - All test suites, benchmark harnesses, and their specific methodology
+
+This NOTICE is descriptive, not a legal certification of non-infringement.
+It does not substitute for advice from a qualified intellectual-property
+attorney, particularly regarding patent freedom-to-operate, which requires a
+formal search this document does not attempt.

@@ -1,8 +1,12 @@
 # PORTCULLIS
 
-<!-- CI badge intentionally absent: no remote is configured yet, so the workflow
-     has never run. A green badge that nothing produced is exactly the kind of
-     unearned claim this project argues against. Restore it once CI runs. -->
+<!-- CI badge intentionally absent: the remote is now configured
+     (github.com/Kaushik2210/PORTCULLIS) but nothing has been pushed yet, so
+     the workflow has never run. A green badge that nothing produced is
+     exactly the kind of unearned claim this project argues against. Restore
+     it with `[![CI](https://github.com/Kaushik2210/PORTCULLIS/actions/workflows/ci.yml/badge.svg)]
+     (https://github.com/Kaushik2210/PORTCULLIS/actions/workflows/ci.yml)`
+     once the first push has produced a real run. -->
 
 **A real-time adversarial prompt-injection detection gateway for LLM applications.**
 Think WAF, but the payloads are natural language and the protected asset is a model's
@@ -91,7 +95,7 @@ Requires Python 3.13+, [`uv`](https://docs.astral.sh/uv/), [`just`](https://just
 Docker.
 
 ```bash
-git clone <repo> && cd portcullis
+git clone https://github.com/Kaushik2210/PORTCULLIS.git && cd PORTCULLIS
 just install
 just check
 ```
@@ -131,6 +135,12 @@ ops/                 compose, Grafana dashboards, CI
 - [ADR-0004 — Corpus backbone and gated data](docs/adr/0004-corpus-and-gated-data.md)
 - [Ethics and responsible disclosure](docs/ETHICS.md)
 
-## Licence
+## Licence and authorship
 
-Apache-2.0.
+Apache-2.0 — see [`LICENSE`](LICENSE).
+
+The architecture, rule corpus, DSL, and documentation in this repository are original
+work. Established public techniques this project applies (MinHash deduplication,
+cascaded classification, Unicode confusable folding, and others) are credited in
+[`NOTICE`](NOTICE), which also states plainly what is and is not an original
+contribution here.
