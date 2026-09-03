@@ -12,11 +12,13 @@ Design notes that matter for reading the numbers:
   serving someone else. A gateway SLO quoted from the idle number is a fiction;
   both are published.
 * **p95 needs samples.** Each config runs until it hits either ``--max-iters`` or a
-  per-config time budget, with a floor of 30 iterations. The realised N is recorded
-  next to every percentile so a reader can judge the estimate.
-* **Thermal drift is exposed, not hidden.** The target is a 13th-gen mobile CPU with
-  P/E cores; sustained load throttles. Each config reports the median of its first
-  half against its second half. A large gap means the number is not steady-state.
+  per-config time budget, with a floor of ``MIN_ITERS`` iterations. The realised N
+  is recorded next to every percentile so a reader can judge the estimate.
+* **Contaminated cells are flagged, not hidden.** The target is a 13th-gen mobile
+  CPU with P/E cores; sustained load throttles, and background I/O distorts more.
+  Each config compares the median of its first half against its second, and a cell
+  is marked ``suspect`` on excessive drift, too few samples, or a p95 far above its
+  p50. Suspect cells are excluded from the frontier plot and listed explicitly.
 
 Run via ``just bench``.
 """
@@ -375,7 +377,17 @@ def main() -> int:
     (args.outdir / "l2-frontier.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     write_markdown(results, failures, host, args.outdir / "l2-frontier.md")
     write_plot(results, args.outdir / "l2-frontier.png")
-    print(f"\n{len(results)} measurements, {len(failures)} failures", flush=True)
+    bad = [r for r in results if not r.trustworthy]
+    print(
+        f"\n{len(results)} measurements, {len(failures)} export failures, "
+        f"{len(bad)} flagged suspect (excluded from the frontier plot)",
+        flush=True,
+    )
+    for r in bad:
+        print(
+            f"    suspect: {r.model} {r.variant} seq={r.seq_len} thr={r.threads}: {r.suspect}",
+            flush=True,
+        )
     return 0
 
 
