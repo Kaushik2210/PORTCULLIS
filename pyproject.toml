@@ -73,6 +73,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "packages/*/tests/*" = ["S", "ANN"]
+# This module's entire purpose is to hold visually-confusable characters.
+# RUF001-003 flag exactly the content it is supposed to contain.
+"packages/core/src/portcullis/core/l0/confusables.py" = ["RUF001", "RUF002", "RUF003"]
+# Same reason: these tests assert that confusables and fullwidth forms fold.
+"packages/core/tests/test_l0_*.py" = ["S", "ANN", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["portcullis"]

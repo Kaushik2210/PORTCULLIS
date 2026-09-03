@@ -1,6 +1,8 @@
 # PORTCULLIS
 
-[![CI](https://github.com/OWNER/portcullis/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/portcullis/actions/workflows/ci.yml)
+<!-- CI badge intentionally absent: no remote is configured yet, so the workflow
+     has never run. A green badge that nothing produced is exactly the kind of
+     unearned claim this project argues against. Restore it once CI runs. -->
 
 **A real-time adversarial prompt-injection detection gateway for LLM applications.**
 Think WAF, but the payloads are natural language and the protected asset is a model's
