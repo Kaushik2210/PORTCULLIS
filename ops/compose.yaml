@@ -1,0 +1,42 @@
+name: portcullis
+
+services:
+  redis:
+    image: redis:8-alpine
+    # Conversation state (L4) and rate limiting. State is intentionally
+    # ephemeral: every key carries a TTL, and losing it degrades L4 to
+    # stateless rather than breaking the cascade.
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    # Decision log and embedding store. Unlike Redis this is durable: the
+    # decision log is the audit trail, and shadow mode is worthless without it.
+    environment:
+      POSTGRES_USER: portcullis
+      POSTGRES_PASSWORD: portcullis
+      POSTGRES_DB: portcullis
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portcullis -d portcullis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
