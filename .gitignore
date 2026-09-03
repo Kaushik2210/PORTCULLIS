@@ -1,0 +1,70 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Models & artifacts (never committed; rebuilt by `just` targets) ---
+models/
+*.onnx
+*.onnx_data
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# --- Data: manifests and hashes only, never raw corpora ---
+# Excluding the directory itself would stop git descending into it, which makes
+# the negations below unreachable. Exclude the *contents* instead.
+data/raw/*
+data/interim/*
+data/processed/*
+data/cache/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep
+!data/**/*.manifest.json
+!data/**/*.sha256
+
+# --- FAISS indexes (rebuilt from manifest) ---
+*.faiss
+*.index
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+
+# --- Secrets & local config ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- OS / editor / OneDrive noise ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Notebooks: outputs stripped before commit ---
+.ipynb_checkpoints/
+
+# Benchmark run logs (artifacts live in docs/benchmarks/)
+bench_run.log
+*.log

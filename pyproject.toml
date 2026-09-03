@@ -1,0 +1,112 @@
+[project]
+name = "portcullis"
+version = "0.1.0"
+description = "Real-time adversarial prompt injection detection gateway for LLM applications"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    "portcullis-core",
+    "portcullis-gateway",
+    "portcullis-training",
+    "portcullis-eval",
+    "portcullis-client",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "mypy>=1.18",
+    "pytest>=8.4",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.140",
+    "matplotlib>=3.11.1",
+]
+
+# Milestone-0 latency spike only. Deliberately NOT a runtime dependency of
+# portcullis-core: the detection path must never import torch.
+bench = [
+    "torch>=2.6",
+    "transformers>=4.48",
+    "onnx>=1.17",
+    "onnxruntime>=1.29",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+portcullis-core     = { workspace = true }
+portcullis-gateway  = { workspace = true }
+portcullis-training = { workspace = true }
+portcullis-eval     = { workspace = true }
+portcullis-client   = { workspace = true }
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["packages/*/src", "packages/*/tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "PTH",       # use pathlib
+    "RUF",       # ruff-specific
+    "S",         # bandit (security) - relevant for a security product
+    "ANN",       # type annotations
+    "PT",        # pytest style
+]
+ignore = [
+    "ANN401",  # allow Any in narrowly-typed adapter boundaries
+    "S101",    # assert is fine (pytest)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"packages/*/tests/*" = ["S", "ANN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["portcullis"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_no_return = true
+disallow_any_unimported = true
+show_error_codes = true
+mypy_path = "packages/core/src:packages/gateway/src:packages/training/src:packages/eval/src:packages/client/src"
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# Third-party packages that ship no py.typed marker. Each entry is a deliberate,
+# contained exception to --strict, not a blanket relaxation. ADR-0003 notes the
+# same constraint applies to faiss-cpu when the kNN sidecar lands.
+[[tool.mypy.overrides]]
+module = ["onnxruntime.*", "transformers.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "packages/core/tests", "packages/gateway/tests", "packages/training/tests", "packages/eval/tests", "packages/client/tests"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+markers = [
+    "slow: benchmarks and model-loading tests (deselect with -m 'not slow')",
+    "needs_infra: requires Redis/Postgres via docker compose",
+    "needs_model: requires a downloaded model checkpoint",
+]
