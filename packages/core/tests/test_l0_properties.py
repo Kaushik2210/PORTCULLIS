@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -149,6 +150,7 @@ def test_obfuscation_score_is_a_probability_like_scalar(text: str) -> None:
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_l0_stays_inside_its_share_of_the_tier_a_budget() -> None:
     """L0 must leave room for L1 inside the 5ms Tier-A budget (ADR-0002).
 

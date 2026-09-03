@@ -48,8 +48,13 @@ jobs:
       - name: mypy (strict)
         run: uv run mypy packages tests
 
-      - name: pytest
+      - name: pytest (functional)
         run: uv run pytest -q -m "not slow and not needs_infra and not needs_model"
+
+      # Separate step, and deliberately so: a latency assertion measured while
+      # the property suite saturates the runner is measuring contention.
+      - name: pytest (latency guards)
+        run: uv run pytest -q -m "slow and not needs_infra and not needs_model"
 
   compose:
     name: compose file validates

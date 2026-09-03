@@ -22,6 +22,7 @@ dev = [
     "pytest-cov>=6.0",
     "hypothesis>=6.140",
     "matplotlib>=3.11.1",
+    "types-pyyaml>=6.0",
 ]
 
 # Milestone-0 latency spike only. Deliberately NOT a runtime dependency of
@@ -103,6 +104,14 @@ disallow_untyped_defs = false
 # same constraint applies to faiss-cpu when the kNN sidecar lands.
 [[tool.mypy.overrides]]
 module = ["onnxruntime.*", "transformers.*"]
+ignore_missing_imports = true
+
+# The bench group is optional and not installed by a plain `uv sync`, so these
+# are absent from the default environment. The alternative - making every
+# contributor download torch to typecheck - is worse, and nothing in the
+# detection path imports them.
+[[tool.mypy.overrides]]
+module = ["torch.*", "numpy.*", "onnx.*", "matplotlib.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest

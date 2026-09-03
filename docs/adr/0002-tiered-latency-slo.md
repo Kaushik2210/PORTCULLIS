@@ -62,9 +62,49 @@ a limitation shared by both paths, and this ADR claims no more than that.
 
 | Tier | Path | Input | Budget (p95) | Basis |
 |---|---|---|---|---|
-| **A** | L0 + L1 short-circuit | 2KB | **< 5ms** | To be verified at M2. Target, not yet measured. |
+| **A** | L0 + L1 short-circuit | 2KB | **< 10ms** | Measured at M2: 6.7ms. Revised from 5ms - see below. |
 | **B** | Full ingress incl. L2 | typical (≤512B, seq 128) | **< 25ms** | Measured: 21.2ms, MiniLM-L6 INT8 @ 4thr |
 | **C** | Full ingress incl. L2 | worst case (2KB, seq 512) | **< 150ms** | Measured: 135.4ms, same configuration |
+
+### Tier A revised from 5ms to 10ms (Milestone 2)
+
+The 5ms figure was labelled above as a target, not a measurement. Milestone 2 measured it
+against the real 50-rule corpus on 2KB of clean English:
+
+| Component | p50 | p95 |
+|---|---:|---:|
+| L0 normalisation | 0.47ms | 0.98ms |
+| L1, 43 user-scoped rules | 3.36ms | 5.76ms |
+| **L0 + L1** | **3.8ms** | **~6.7ms** |
+
+L1 dominates, at roughly 80-260us per rule. The cost is inherent to the rule shapes: an
+alternation of negation verbs followed by a bounded gap has no literal prefix for the regex
+engine to skip ahead on, so each rule scans the full input.
+
+**A literal prefilter was implemented and then removed.** Deriving each rule's required literals
+by inspecting its pattern text is not sound: `\[INST\]` is an escaped literal bracket rather than
+a character class, so stripping character classes discarded a required literal and the rule was
+silently skipped on input it should have matched. It also turned out *slower*, because a
+per-rule substring sweep over 2KB costs more than the regex it was avoiding. **In a security
+product, a false negative introduced by a latency optimisation is a strictly worse outcome than
+the milliseconds it buys**, so the budget moves instead of the detection.
+
+The budget moves to 10ms rather than to the measured 6.7ms, to absorb CI-runner variance without
+the guard test becoming flaky and being ignored.
+
+**Why this does not weaken the cascade argument.** The cost case in ADR-0001 does not depend on
+Tier A being any particular absolute number - it depends on the *ratio* between the
+short-circuit path and the full path. At 6.7ms versus 135ms that ratio is roughly 20x, and the
+argument for running cheap layers first is unchanged. A reviewer should hold the architecture to
+the ratio and to the measured short-circuit rate (Milestone 9), not to this figure.
+
+**The sound optimisation, recorded as future work.** Author-declared literals: an explicit
+`requires: [ignore, disregard, ...]` field per rule, checked as a set intersection against the
+tokenised input before the regex runs, and validated by a test asserting that every one of the
+rule's own positive cases contains at least one declared literal. That is sound by assertion
+plus verification rather than by inference, and it is reviewable in the YAML. It is deferred
+because it needs a positive case per alternation branch to be trustworthy, which is a rule-corpus
+convention to establish rather than a code change to make.
 
 Supporting decisions:
 

@@ -19,12 +19,17 @@ lint:
     uv run ruff format --check .
     uv run mypy packages tests
 
-# Run the test suite (excludes benchmarks and infra-dependent tests).
+# Functional tests. Excludes latency guards, which must not be measured
+# while the property suite is saturating the CPU.
 test:
     uv run pytest -q -m "not slow and not needs_infra and not needs_model"
 
+# Latency guards, run alone and serially so the numbers mean something.
+test-perf:
+    uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model"
+
 # Everything CI runs, in CI order.
-check: lint test
+check: lint test test-perf
 
 # Auto-fix what can be auto-fixed.
 fix:
