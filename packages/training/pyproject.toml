@@ -6,7 +6,12 @@ requires-python = ">=3.13"
 dependencies = [
     "datasets>=3.0",
     "datasketch>=1.6",
+    "onnx>=1.17",
+    "onnxruntime>=1.29",
     "portcullis-core",
+    "scikit-learn>=1.5",
+    "torch>=2.6",
+    "transformers>=4.48",
 ]
 
 [build-system]

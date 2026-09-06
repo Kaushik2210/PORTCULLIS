@@ -50,6 +50,31 @@ bench:
 data:
     uv run --package portcullis-training python -m portcullis.training.data.pipeline
 
+# --- L2 (Milestone 4) -------------------------------------------------------
+
+L2_CHECKPOINT_DIR := env_var('LOCALAPPDATA') / "portcullis" / "l2_checkpoint"
+L2_MODEL_DIR := env_var('LOCALAPPDATA') / "portcullis" / "l2_export"
+
+# Weak-label train/validation against the L1 rule taxonomy (ADR-0005).
+weak-label:
+    uv run --package portcullis-training python -m portcullis.training.l2.weak_label_corpus
+
+# Fine-tune MiniLM-L6 on the masked multi-label objective. CPU, no GPU here.
+# Checkpoint written outside the repo entirely (see train.py docstring).
+train-l2:
+    uv run --package portcullis-training python -m portcullis.training.l2.train --out-dir "{{L2_CHECKPOINT_DIR}}"
+
+# Fit Platt scaling and produce the reliability diagram (NFR-2).
+calibrate-l2:
+    uv run --package portcullis-training python -m portcullis.training.l2.calibrate --checkpoint-dir "{{L2_CHECKPOINT_DIR}}"
+
+# ONNX export, INT8 quantise, accuracy-delta check, latency histogram.
+export-l2:
+    uv run --package portcullis-training python -m portcullis.training.l2.export --checkpoint-dir "{{L2_CHECKPOINT_DIR}}" --model-out-dir "{{L2_MODEL_DIR}}"
+
+# The full M4 pipeline, in order.
+l2: weak-label train-l2 calibrate-l2 export-l2
+
 # --- evaluation ------------------------------------------------------------
 
 # Regenerate every number in the README. Not yet implemented (Milestone 9).

@@ -117,8 +117,21 @@ module = ["torch.*", "numpy.*", "onnx.*", "matplotlib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["datasets.*", "datasketch.*"]
+module = ["datasets.*", "datasketch.*", "sklearn.*"]
 ignore_missing_imports = true
+
+# PyTorch/transformers ship real (py.typed) but incomplete stubs: nn.Module's
+# inherited eval()/train() and Tensor.backward() are not typed in a way
+# --strict's disallow_untyped_calls accepts, even though the classes
+# themselves resolve correctly. A narrow, scoped relaxation - not a general
+# escape hatch - for exactly the modules that call into them.
+[[tool.mypy.overrides]]
+module = [
+    "portcullis.training.l2.train",
+    "portcullis.training.l2.export",
+    "portcullis.training.l2.calibrate",
+]
+disallow_untyped_calls = false
 
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
