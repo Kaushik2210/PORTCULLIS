@@ -36,7 +36,7 @@ from transformers import (
 )
 
 from .labels import TAXONOMY
-from .train import MAX_SEQ_LEN
+from .train import load_training_config
 
 _BENIGN_INDEX = TAXONOMY.index("benign")
 
@@ -55,6 +55,7 @@ def raw_attack_scores(
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],
     *,
+    max_seq_len: int,
     batch_size: int = 32,
 ) -> np.ndarray:
     """-logit(benign) for each text: higher means more attack-like.
@@ -63,6 +64,10 @@ def raw_attack_scores(
     Platt scaling is defined over an unbounded decision-function value, and
     fitting it on an already-squashed [0,1] score double-compresses the tails
     exactly where a fixed-FPR threshold decision is most sensitive.
+
+    `max_seq_len` is required, not defaulted: it must match what the
+    checkpoint was actually trained at (load_training_config), not this
+    module's own idea of a sensible default.
     """
     model.eval()
     scores = []
@@ -70,7 +75,7 @@ def raw_attack_scores(
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             enc = tokenizer(
-                batch, truncation=True, max_length=MAX_SEQ_LEN, padding=True, return_tensors="pt"
+                batch, truncation=True, max_length=max_seq_len, padding=True, return_tensors="pt"
             )
             logits = model(**enc).logits
             scores.append((-logits[:, _BENIGN_INDEX]).numpy())
@@ -131,7 +136,9 @@ def reliability_diagram(
 
 
 def run(*, checkpoint_dir: Path, data_dir: Path, out_dir: Path) -> None:
-    print(f"loading checkpoint from {checkpoint_dir}", flush=True)
+    config = load_training_config(checkpoint_dir)
+    max_seq_len = config["max_seq_len"]
+    print(f"loading checkpoint from {checkpoint_dir} (max_seq_len={max_seq_len})", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(checkpoint_dir)
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(checkpoint_dir)
 
@@ -145,7 +152,7 @@ def run(*, checkpoint_dir: Path, data_dir: Path, out_dir: Path) -> None:
     true_labels = np.array([r["label"] for r in rows], dtype=np.float64)
     print(f"scoring {len(texts)} validation rows (true binary labels)", flush=True)
 
-    raw = raw_attack_scores(model, tokenizer, texts)
+    raw = raw_attack_scores(model, tokenizer, texts, max_seq_len=max_seq_len)
     platt = fit_platt(raw, true_labels)
     print(f"Platt params: a={platt.a:.4f} b={platt.b:.4f}", flush=True)
 

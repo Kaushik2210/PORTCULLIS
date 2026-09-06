@@ -61,8 +61,12 @@ weak-label:
 
 # Fine-tune MiniLM-L6 on the masked multi-label objective. CPU, no GPU here.
 # Checkpoint written outside the repo entirely (see train.py docstring).
+# epochs=1, seq_len=128, batch=32: measured on this machine at Milestone 4 -
+# the seq=256 default takes ~83min/epoch here (3.2 rows/s); this configuration
+# measured ~33min/epoch (8.0 rows/s). One epoch matches the "prove the
+# pipeline" scope agreed for M4, not a claim of a well-trained model.
 train-l2:
-    uv run --package portcullis-training python -m portcullis.training.l2.train --out-dir "{{L2_CHECKPOINT_DIR}}"
+    uv run --package portcullis-training python -m portcullis.training.l2.train --out-dir "{{L2_CHECKPOINT_DIR}}" --epochs 1 --batch-size 32 --max-seq-len 128
 
 # Fit Platt scaling and produce the reliability diagram (NFR-2).
 calibrate-l2:

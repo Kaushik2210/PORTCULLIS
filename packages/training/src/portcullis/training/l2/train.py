@@ -37,9 +37,15 @@ DEFAULT_OUT_DIR = Path.home() / "AppData" / "Local" / "portcullis" / "l2_checkpo
 
 
 class MaskedMultiLabelDataset(Dataset[dict[str, torch.Tensor]]):
-    def __init__(self, examples: list[TrainingExample], tokenizer: PreTrainedTokenizerBase) -> None:
+    def __init__(
+        self,
+        examples: list[TrainingExample],
+        tokenizer: PreTrainedTokenizerBase,
+        max_seq_len: int = MAX_SEQ_LEN,
+    ) -> None:
         self.examples = examples
         self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
 
     def __len__(self) -> int:
         return len(self.examples)
@@ -49,7 +55,7 @@ class MaskedMultiLabelDataset(Dataset[dict[str, torch.Tensor]]):
         enc = self.tokenizer(
             ex.text,
             truncation=True,
-            max_length=MAX_SEQ_LEN,
+            max_length=self.max_seq_len,
             padding="max_length",
             return_tensors="pt",
         )
@@ -73,6 +79,20 @@ def masked_bce_loss(logits: torch.Tensor, target: torch.Tensor, mask: torch.Tens
     masked = per_element * mask
     denom = mask.sum().clamp(min=1.0)
     return masked.sum() / denom
+
+
+def load_training_config(checkpoint_dir: Path) -> dict[str, int]:
+    """Read back the actual hyperparameters a checkpoint was trained with.
+
+    Consumed by calibrate.py and export.py so they tokenize at the real
+    max_seq_len rather than assuming this module's default - see the note
+    where training_config.json is written in train().
+    """
+    path = checkpoint_dir / "training_config.json"
+    if not path.exists():
+        return {"max_seq_len": MAX_SEQ_LEN}
+    result: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
+    return result
 
 
 def load_partition(data_dir: Path, name: str) -> list[TrainingExample]:
@@ -118,6 +138,8 @@ def train(
     batch_size: int,
     lr: float,
     log_every: int,
+    max_seq_len: int = MAX_SEQ_LEN,
+    max_train_rows: int | None = None,
 ) -> None:
     torch.manual_seed(0)
 
@@ -131,10 +153,21 @@ def train(
     print("loading train/validation partitions", flush=True)
     train_examples = load_partition(data_dir, "train")
     val_examples = load_partition(data_dir, "validation")
+    if max_train_rows is not None and max_train_rows < len(train_examples):
+        # A deterministic *stride*, not a prefix: train.jsonl is written
+        # sorted by row id (pipeline.py), which is the original PromptShield
+        # row order - M3 found that corpus is heavily templated, and template
+        # variants often sit in contiguous blocks. A prefix could massively
+        # over- or under-represent whichever templates happen to sit first.
+        # Striding through the full range is far safer against that ordering
+        # artefact, and still fully reproducible (NFR-6): same cap, same
+        # subset, every run.
+        stride = len(train_examples) / max_train_rows
+        train_examples = [train_examples[int(i * stride)] for i in range(max_train_rows)]
     print(f"  train: {len(train_examples)} rows, validation: {len(val_examples)} rows", flush=True)
 
-    train_ds = MaskedMultiLabelDataset(train_examples, tokenizer)
-    val_ds = MaskedMultiLabelDataset(val_examples, tokenizer)
+    train_ds = MaskedMultiLabelDataset(train_examples, tokenizer, max_seq_len)
+    val_ds = MaskedMultiLabelDataset(val_examples, tokenizer, max_seq_len)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
@@ -177,6 +210,15 @@ def train(
     tokenizer.save_pretrained(out_dir)
     (out_dir / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     (out_dir / "taxonomy.json").write_text(json.dumps(list(TAXONOMY)), encoding="utf-8")
+    # Downstream steps (calibrate.py, export.py) must tokenize at the same
+    # max_seq_len the model was actually trained at, not the module default -
+    # this file's own MAX_SEQ_LEN constant is only the default, and Milestone
+    # 4's real run overrides it (128, not 256) for CPU throughput. Persisting
+    # it here is what lets those steps read the truth instead of assuming it.
+    (out_dir / "training_config.json").write_text(
+        json.dumps({"max_seq_len": max_seq_len, "epochs": epochs, "batch_size": batch_size}),
+        encoding="utf-8",
+    )
     print(f"\nsaved checkpoint to {out_dir}", flush=True)
 
 
@@ -188,6 +230,13 @@ def main() -> int:
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--lr", type=float, default=3e-5)
     ap.add_argument("--log-every", type=int, default=100)
+    ap.add_argument("--max-seq-len", type=int, default=MAX_SEQ_LEN)
+    ap.add_argument(
+        "--max-train-rows",
+        type=int,
+        default=None,
+        help="Deterministically stride-sample train to this many rows (see train() docstring).",
+    )
     args = ap.parse_args()
     train(
         data_dir=args.data_dir,
@@ -196,6 +245,8 @@ def main() -> int:
         batch_size=args.batch_size,
         lr=args.lr,
         log_every=args.log_every,
+        max_seq_len=args.max_seq_len,
+        max_train_rows=args.max_train_rows,
     )
     return 0
 

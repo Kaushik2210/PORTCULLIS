@@ -28,7 +28,7 @@ from transformers import (
 )
 
 from .labels import TAXONOMY
-from .train import MAX_SEQ_LEN
+from .train import MAX_SEQ_LEN, load_training_config
 
 _BENIGN_INDEX = TAXONOMY.index("benign")
 
@@ -85,18 +85,25 @@ def accuracy_delta(
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],
     true_labels: list[int],
+    *,
+    max_seq_len: int,
 ) -> dict[str, object]:
     """Compares fp32 vs INT8 predictions on the same inputs: agreement rate
     on the binary attack/benign call, and each variant's own accuracy
     against ground truth - the spec's "verify accuracy delta is within
     tolerance" made concrete rather than asserted.
+
+    `max_seq_len` must match what the checkpoint was trained at
+    (load_training_config): truncating validation text differently from
+    training would make this comparison unfair to both variants equally,
+    but still not a fair test of what the model actually learned.
     """
     fp32 = ort.InferenceSession(str(fp32_path), providers=["CPUExecutionProvider"])
     int8 = ort.InferenceSession(str(int8_path), providers=["CPUExecutionProvider"])
 
     agree, fp32_correct, int8_correct = 0, 0, 0
     for text, true_label in zip(texts, true_labels, strict=True):
-        enc = tokenizer(text, truncation=True, max_length=MAX_SEQ_LEN, return_tensors="np")
+        enc = tokenizer(text, truncation=True, max_length=max_seq_len, return_tensors="np")
         ids, mask = enc["input_ids"].astype(np.int64), enc["attention_mask"].astype(np.int64)
 
         fp32_attack = _onnx_benign_logit(fp32, ids, mask) < 0  # benign logit < 0 => attack-leaning
@@ -194,11 +201,13 @@ def latency_histogram(int8_path: Path, out_path: Path) -> dict[str, LatencyStats
 
 
 def run(*, checkpoint_dir: Path, data_dir: Path, model_out_dir: Path, report_out_dir: Path) -> None:
+    config = load_training_config(checkpoint_dir)
+    max_seq_len = config["max_seq_len"]
     fp32_path = model_out_dir / "l2.onnx"
     int8_path = model_out_dir / "l2.int8.onnx"
 
-    print(f"exporting ONNX (seq={MAX_SEQ_LEN}) from {checkpoint_dir}", flush=True)
-    export_onnx(checkpoint_dir, fp32_path)
+    print(f"exporting ONNX (seq={max_seq_len}) from {checkpoint_dir}", flush=True)
+    export_onnx(checkpoint_dir, fp32_path, seq_len=max_seq_len)
     print("quantising INT8", flush=True)
     quantize_int8(fp32_path, int8_path)
     fp32_mb = fp32_path.stat().st_size / (1024 * 1024)
@@ -216,7 +225,9 @@ def run(*, checkpoint_dir: Path, data_dir: Path, model_out_dir: Path, report_out
     true_labels = [r["label"] for r in rows]
 
     print(f"measuring accuracy delta on {len(texts)} validation rows", flush=True)
-    delta = accuracy_delta(fp32_path, int8_path, tokenizer, texts, true_labels)
+    delta = accuracy_delta(
+        fp32_path, int8_path, tokenizer, texts, true_labels, max_seq_len=max_seq_len
+    )
     print(
         f"  fp32 acc={delta['fp32_accuracy']:.3f} int8 acc={delta['int8_accuracy']:.3f} "
         f"delta={delta['accuracy_delta']:+.3f} agreement={delta['fp32_int8_agreement_rate']:.3f}",

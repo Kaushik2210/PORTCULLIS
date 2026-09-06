@@ -24,7 +24,7 @@ def test_fully_masked_row_gets_zero_gradient_contribution() -> None:
     loss = masked_bce_loss(logits, target, mask)
     assert loss.item() == 0.0
 
-    loss.backward()
+    loss.backward()  # type: ignore[no-untyped-call]  # torch stub gap, see pyproject.toml
     assert logits.grad is not None
     assert torch.all(logits.grad == 0.0)
 
