@@ -3,7 +3,11 @@ name = "portcullis-training"
 version = "0.1.0"
 description = "Data pipeline, training, calibration, and ONNX export"
 requires-python = ">=3.13"
-dependencies = ["portcullis-core"]
+dependencies = [
+    "datasets>=3.0",
+    "datasketch>=1.6",
+    "portcullis-core",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -28,19 +28,33 @@ def test_portcullis_is_a_namespace_package() -> None:
 
 
 def test_no_raw_corpora_committed() -> None:
-    """data/ carries manifests and hashes only — never the corpora themselves.
+    """data/ is tracked in git as manifests and hashes only — never the
+    corpora themselves.
 
     Guards the licence and reproducibility story: raw rows must be rebuildable
-    from a manifest, not vendored into git.
+    from a manifest, not vendored into git. This checks what git actually
+    *tracks*, not what exists on disk — `just data` legitimately writes real
+    JSONL partitions into data/processed/ as build output, and finding them
+    there is correct, not a violation. gitignore is what keeps them out of
+    the repo; this test verifies gitignore's promise held, rather than
+    re-asserting a stricter rule against the working tree that the pipeline
+    itself would violate on every run.
     """
-    data = REPO / "data"
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "ls-files", "data/"],  # noqa: S607 - test-only, the repo's own git, not untrusted input
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked = [line for line in result.stdout.splitlines() if line.strip()]
     allowed_suffixes = {".json", ".sha256", ".md"}
     bad = [
-        p
-        for p in data.rglob("*")
-        if p.is_file() and p.name != ".gitkeep" and p.suffix not in allowed_suffixes
+        p for p in tracked if Path(p).name != ".gitkeep" and Path(p).suffix not in allowed_suffixes
     ]
-    assert bad == [], f"unexpected files under data/: {bad}"
+    assert bad == [], f"unexpected tracked files under data/: {bad}"
 
 
 def test_readme_publishes_no_unearned_metrics() -> None:

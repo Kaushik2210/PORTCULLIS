@@ -1,0 +1,90 @@
+{
+  "partitions": {
+    "cross_source_eval": {
+      "label_counts": {
+        "0": 1018,
+        "1": 676
+      },
+      "licenses": [
+        "apache-2.0"
+      ],
+      "row_count": 1694,
+      "sha256": "0ef05508bdf05aca6e818aeb3d3d826b2aa3ac16145fd56de1b741a9eeb00bb1",
+      "sources": {
+        "deepset_prompt_injections": 580,
+        "jackhhao_jailbreak": 1114
+      },
+      "tiers": [
+        1
+      ]
+    },
+    "hard_negatives_eval": {
+      "label_counts": {
+        "0": 70
+      },
+      "licenses": [
+        "apache-2.0"
+      ],
+      "row_count": 70,
+      "sha256": "cd553ef58fc5213f93a21ce5f3392a4797cf6d0fba19eb73031088abf069a8a3",
+      "sources": {
+        "hard_negatives": 70
+      },
+      "tiers": [
+        1
+      ]
+    },
+    "test": {
+      "label_counts": {
+        "0": 14241,
+        "1": 5696
+      },
+      "licenses": [
+        "apache-2.0"
+      ],
+      "row_count": 19937,
+      "sha256": "835db1824f6d96c1a99db5dbfd5cdf5f58efa91c7d85d71c09567e09fdd28d99",
+      "sources": {
+        "promptshield": 19937
+      },
+      "tiers": [
+        1
+      ]
+    },
+    "train": {
+      "label_counts": {
+        "0": 9199,
+        "1": 6831
+      },
+      "licenses": [
+        "apache-2.0"
+      ],
+      "row_count": 16030,
+      "sha256": "ffd4929a407d6fb887ace3c80615bd9f5af35a6c9939679c6dc96b54c7a44d62",
+      "sources": {
+        "promptshield": 16030
+      },
+      "tiers": [
+        1
+      ]
+    },
+    "validation": {
+      "label_counts": {
+        "0": 462,
+        "1": 328
+      },
+      "licenses": [
+        "apache-2.0"
+      ],
+      "row_count": 790,
+      "sha256": "6c33bfe8d681ba369430782ae79d1477c4f16424dd265088be61188e5ba27b40",
+      "sources": {
+        "promptshield": 790
+      },
+      "tiers": [
+        1
+      ]
+    }
+  },
+  "schema_version": 1
+}

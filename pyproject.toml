@@ -116,6 +116,10 @@ ignore_missing_imports = true
 module = ["torch.*", "numpy.*", "onnx.*", "matplotlib.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["datasets.*", "datasketch.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 minversion = "8.0"

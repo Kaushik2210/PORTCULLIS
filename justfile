@@ -43,6 +43,13 @@ fix:
 bench:
     uv run --group bench python -m portcullis.eval.bench_l2_frontier
 
+# --- data --------------------------------------------------------------
+
+# Rebuild the training corpus from its sources: ingest, MinHash dedup,
+# family-disjoint split, leakage audit, manifest. Tier 1 (ungated) only.
+data:
+    uv run --package portcullis-training python -m portcullis.training.data.pipeline
+
 # --- evaluation ------------------------------------------------------------
 
 # Regenerate every number in the README. Not yet implemented (Milestone 9).
