@@ -142,7 +142,13 @@ def _strip_quoted_payloads(text: str) -> str:
     """
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     text = re.sub(r"`[^`]*`", " ", text)
-    text = re.sub(r'"[^"\n]*"', " ", text)
+    # Bounded rather than newline-excluded: markdown prose commonly wraps a
+    # quoted example across a line break at ~80-100 chars (found when
+    # ADR-0005's own quoted attack examples wrapped mid-quote and were not
+    # stripped, tripping this exact test). [^"] already matches newlines: the
+    # bound exists only to stop a genuinely unterminated quote from
+    # consuming the rest of the document.
+    text = re.sub(r'"[^"]{0,400}"', " ", text)
     return text
 
 
