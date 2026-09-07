@@ -30,6 +30,8 @@ class GatewayConfig:
     sanitise_threshold: float
     challenge_threshold: float
     block_threshold: float
+    redis_url: str | None
+    conversation_ttl_s: float
 
     @classmethod
     def from_env(cls) -> GatewayConfig:
@@ -67,4 +69,10 @@ class GatewayConfig:
             sanitise_threshold=float(os.environ.get("PORTCULLIS_SANITISE_THRESHOLD", "0.4")),
             challenge_threshold=float(os.environ.get("PORTCULLIS_CHALLENGE_THRESHOLD", "0.6")),
             block_threshold=float(os.environ.get("PORTCULLIS_BLOCK_THRESHOLD", "0.8")),
+            # None (the default) means conversation tracking uses an
+            # in-process InMemoryConversationStore - real, working L4, just
+            # not shared across processes or surviving a restart. Set this
+            # to opt into the Redis-backed store (ADR-0008, Decision 4).
+            redis_url=os.environ.get("PORTCULLIS_REDIS_URL"),
+            conversation_ttl_s=float(os.environ.get("PORTCULLIS_CONVERSATION_TTL_S", "1800")),
         )

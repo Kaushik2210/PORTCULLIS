@@ -14,9 +14,12 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from sentence_transformers import SentenceTransformer
+
 from portcullis.core.fusion import FusionWeights, LayerScores, fuse
 from portcullis.core.l0 import normalize
 from portcullis.core.l1 import RuleEngine, RuleMatch, Scope, load_rules_from_dir
+from portcullis.core.l4 import ConversationState
 from portcullis.core.policy import PolicyConfig, Verdict, decide
 from portcullis.training.knn.embed import load_embedder
 from portcullis.training.knn.scorer import KnnScorer
@@ -50,6 +53,13 @@ class DetectionResult:
     nearest_attack_text: str | None
     nearest_attack_family: str | None
     latency: LatencyBreakdown
+    conversation_state: ConversationState | None = None
+    """Set only when the caller opted into conversation tracking (a
+    `conversation_id` was given) and L4 ran on top of this single-turn
+    result - `None` reproduces exactly M6's stateless behaviour (ADR-0008).
+    `DetectionPipeline.detect()` itself never sets this; it is populated by
+    `ConversationAwareDetector` (conversation.py), which wraps a pipeline
+    rather than this class growing an L4 dependency of its own."""
 
 
 class DetectionPipeline:
@@ -70,12 +80,22 @@ class DetectionPipeline:
         knn_scorer: KnnScorer,
         fusion_weights: FusionWeights,
         policy_config: PolicyConfig,
+        embedder: SentenceTransformer,
     ) -> None:
         self._l1_engine = l1_engine
         self._l2_scorer = l2_scorer
         self._knn_scorer = knn_scorer
         self._fusion_weights = fusion_weights
         self._policy_config = policy_config
+        self._embedder = embedder
+
+    @property
+    def embedder(self) -> SentenceTransformer:
+        """The already-loaded sentence-transformer, exposed so a caller
+        wiring up L4 (`ConversationAwareDetector`, conversation.py) can
+        reuse this instance for topic-pivot embeddings instead of loading
+        a second copy of the same ~90MB model."""
+        return self._embedder
 
     @classmethod
     def from_config(cls, config: GatewayConfig) -> DetectionPipeline:
@@ -96,6 +116,7 @@ class DetectionPipeline:
             knn_scorer=knn_scorer,
             fusion_weights=fusion_weights,
             policy_config=policy_config,
+            embedder=embedder,
         )
 
     def detect(

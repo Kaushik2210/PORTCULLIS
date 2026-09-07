@@ -18,7 +18,9 @@ from fastapi import FastAPI
 
 from portcullis.core.l0 import ViewKind
 from portcullis.core.l1 import RuleMatch, Scope, Severity
+from portcullis.core.l4 import InMemoryConversationStore
 from portcullis.core.policy import Verdict
+from portcullis.gateway.conversation import ConversationAwareDetector
 from portcullis.gateway.mock_upstream import app as mock_upstream_app
 from portcullis.gateway.pipeline import DetectionPipeline, DetectionResult, LatencyBreakdown
 
@@ -82,6 +84,22 @@ def fake_pipeline() -> FakeDetectionPipeline:
 @pytest.fixture
 def injection_marker() -> str:
     return INJECTION_MARKER
+
+
+def fake_embed_fn(text: str) -> tuple[float, ...]:
+    """Not semantically meaningful - deterministic and exactly controllable
+    so a wiring test can craft "same topic" vs. "different topic" pairs by
+    construction, rather than relying on a real embedder's actual semantic
+    behaviour (which core's own L4 test suite already covers exhaustively
+    with hand-picked similarity values)."""
+    return (1.0, 0.0) if "TOPIC_A" in text else (0.0, 1.0)
+
+
+@pytest.fixture
+def conversation_detector(fake_pipeline: FakeDetectionPipeline) -> ConversationAwareDetector:
+    return ConversationAwareDetector(
+        fake_pipeline, InMemoryConversationStore(), fake_embed_fn, ttl_s=1800.0
+    )
 
 
 @pytest.fixture

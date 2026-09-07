@@ -30,6 +30,11 @@ test:
 test-model:
     uv run pytest -q -m needs_model
 
+# Tests that need real infra (Redis via `just up`). Not part of `just check`
+# for the same reason test-model isn't - a fresh clone/CI has none running.
+test-infra:
+    uv run pytest -q -m needs_infra
+
 # Latency guards. Each slow test file runs as its own process, not just
 # serially within one: two tight CPU-bound loops back-to-back in the same
 # interpreter leave enough residual thermal/scheduler state on this hybrid
@@ -128,6 +133,14 @@ gateway-serve:
 # benign and an injection request at each, and prints the difference.
 demo-m6:
     uv run --package portcullis-gateway python -m portcullis.gateway.demo
+
+# --- M7: conversation state machine (L4) ------------------------------------
+
+# Milestone 7's checkpoint artifact: a real multi-turn conversation against
+# the trained checkpoint (cumulative-risk escalation) plus the crescendo
+# algorithm itself on a synthetic sequence. Needs `just l2 m5` first.
+demo-m7:
+    uv run --package portcullis-gateway python -m portcullis.gateway.demo_m7
 
 # --- evaluation ------------------------------------------------------------
 

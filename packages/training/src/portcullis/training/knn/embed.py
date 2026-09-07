@@ -7,10 +7,11 @@ transformers prefix means: a base encoder plus a trained pooling head for
 semantic similarity), so no second download or extra latency budget is
 spent standing up a dedicated embedding model.
 
-This module is offline/training-time: it embeds the corpus once to build the
-index. Runtime (query-time) embedding at the gateway is deferred to M6,
-matching the same "prove the pipeline, wire the live gateway when it exists"
-boundary used for L2 (ADR-0005/M4 - core has no ML runtime dependencies yet).
+Built for offline/training-time use (embedding the corpus once to build the
+index), but `load_embedder`/`embed_texts` are the same two calls the gateway
+now reuses live: once for the kNN sidecar's query-time score (M6), and
+again for L4's topic-pivot-after-refusal similarity (M7, ADR-0008) - both
+share the loaded embedder rather than each standing up their own.
 """
 
 from __future__ import annotations

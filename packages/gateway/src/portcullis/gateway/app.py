@@ -1,11 +1,14 @@
 """The gateway: an OpenAI-compatible transparent proxy plus the standalone
 detection API (spec's API CONTRACT section), both backed by the same
-DetectionPipeline (L0-L2, kNN, fusion, policy - M0-M5).
+DetectionPipeline (L0-L2, kNN, fusion, policy - M0-M5) and, when a caller
+opts in with a `conversation_id`, L4's conversation state machine on top
+(M7, ADR-0008) via `ConversationAwareDetector`.
 
-`create_app(pipeline=...)` lets a test inject a fake pipeline and skip
-loading a real ONNX/sentence-transformer checkpoint entirely; with no
-pipeline given, the real one loads once at startup via `lifespan`, matching
-DetectionPipeline's own load-once-score-many contract (pipeline.py).
+`create_app(pipeline=..., conversation_detector=...)` lets a test inject
+fakes and skip both real model loading and any storage backend entirely;
+with neither given, the real ones build once at startup via `lifespan`,
+matching `DetectionPipeline`'s own load-once-score-many contract
+(pipeline.py).
 """
 
 from __future__ import annotations
@@ -17,11 +20,14 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from portcullis.core.l1 import Scope
+from portcullis.core.l4 import InMemoryConversationStore
 from portcullis.core.policy import Verdict
 
 from .config import GatewayConfig
+from .conversation import ConversationAwareDetector, embed_fn_for
 from .pipeline import DetectionPipeline, DetectionResult
 from .proxy import UpstreamProxy
+from .redis_store import RedisConversationStore
 from .schemas import (
     BatchDetectRequest,
     BatchDetectResponse,
@@ -34,6 +40,7 @@ from .schemas import (
     LatencyBreakdownModel,
     MatchedRule,
     ReadyResponse,
+    conversation_state_to_str,
     verdict_to_str,
 )
 
@@ -79,14 +86,15 @@ def _to_detect_response(result: DetectionResult) -> DetectResponse:
             fusion_ms=result.latency.fusion_ms,
             total_ms=result.latency.total_ms,
         ),
+        conversation_state=conversation_state_to_str(result.conversation_state),
     )
 
 
-def get_pipeline(request: Request) -> DetectionPipeline:
-    pipeline: DetectionPipeline | None = request.app.state.pipeline
-    if pipeline is None:
+def get_conversation_detector(request: Request) -> ConversationAwareDetector:
+    detector: ConversationAwareDetector | None = request.app.state.conversation_detector
+    if detector is None:
         raise HTTPException(status_code=503, detail="detection pipeline not ready")
-    return pipeline
+    return detector
 
 
 def get_proxy(request: Request) -> UpstreamProxy:
@@ -101,10 +109,12 @@ def create_app(
     config: GatewayConfig | None = None,
     pipeline: DetectionPipeline | None = None,
     proxy: UpstreamProxy | None = None,
+    conversation_detector: ConversationAwareDetector | None = None,
 ) -> FastAPI:
-    """`pipeline` and `proxy` let a test inject fakes/in-process transports
-    and skip both real model loading and real network sockets entirely -
-    see their own docstrings (pipeline.py, proxy.py)."""
+    """`pipeline`, `proxy` and `conversation_detector` let a test inject
+    fakes/in-process transports and skip real model loading, real network
+    sockets, and any storage backend entirely - see their own docstrings
+    (pipeline.py, proxy.py, conversation.py)."""
     resolved_config = config or GatewayConfig.from_env()
 
     @asynccontextmanager
@@ -113,6 +123,18 @@ def create_app(
             app.state.pipeline = DetectionPipeline.from_config(resolved_config)
         if app.state.proxy is None:
             app.state.proxy = UpstreamProxy(resolved_config.upstream_base_url)
+        if app.state.conversation_detector is None:
+            store = (
+                RedisConversationStore.from_url(resolved_config.redis_url)
+                if resolved_config.redis_url
+                else InMemoryConversationStore()
+            )
+            app.state.conversation_detector = ConversationAwareDetector(
+                app.state.pipeline,
+                store,
+                embed_fn_for(app.state.pipeline.embedder),
+                ttl_s=resolved_config.conversation_ttl_s,
+            )
         yield
         await app.state.proxy.aclose()
 
@@ -120,6 +142,7 @@ def create_app(
     app.state.config = resolved_config
     app.state.pipeline = pipeline
     app.state.proxy = proxy
+    app.state.conversation_detector = conversation_detector
 
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz() -> HealthResponse:
@@ -133,18 +156,30 @@ def create_app(
 
     @app.post("/v1/detect", response_model=DetectResponse)
     async def detect(
-        body: DetectRequest, pipeline_dep: DetectionPipeline = Depends(get_pipeline)
+        body: DetectRequest,
+        conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
     ) -> DetectResponse:
-        result = pipeline_dep.detect(body.text, scope=_SCOPE_MAP[body.scope], shadow=body.shadow)
+        result = conversation_dep.detect(
+            body.text,
+            conversation_id=body.conversation_id,
+            scope=_SCOPE_MAP[body.scope],
+            shadow=body.shadow,
+        )
         return _to_detect_response(result)
 
     @app.post("/v1/detect/batch", response_model=BatchDetectResponse)
     async def detect_batch(
-        body: BatchDetectRequest, pipeline_dep: DetectionPipeline = Depends(get_pipeline)
+        body: BatchDetectRequest,
+        conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
     ) -> BatchDetectResponse:
         results = tuple(
             _to_detect_response(
-                pipeline_dep.detect(item.text, scope=_SCOPE_MAP[item.scope], shadow=item.shadow)
+                conversation_dep.detect(
+                    item.text,
+                    conversation_id=item.conversation_id,
+                    scope=_SCOPE_MAP[item.scope],
+                    shadow=item.shadow,
+                )
             )
             for item in body.items
         )
@@ -153,12 +188,15 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def chat_completions(
         body: ChatCompletionRequest,
-        pipeline_dep: DetectionPipeline = Depends(get_pipeline),
+        conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
         proxy_dep: UpstreamProxy = Depends(get_proxy),
     ) -> Response:
         last_user = next((m.content for m in reversed(body.messages) if m.role == "user"), "")
-        result = pipeline_dep.detect(
-            last_user, scope=Scope.USER, shadow=resolved_config.shadow_mode
+        result = conversation_dep.detect(
+            last_user,
+            conversation_id=body.conversation_id,
+            scope=Scope.USER,
+            shadow=resolved_config.shadow_mode,
         )
         detect_response = _to_detect_response(result)
 
@@ -173,11 +211,15 @@ def create_app(
                 ).model_dump(),
             )
 
-        payload = body.model_dump()
+        # conversation_id is a PORTCULLIS extension, not an OpenAI request
+        # field - stripped before forwarding, so the upstream never sees it.
+        payload = body.model_dump(exclude={"conversation_id"})
         headers = {
             "X-Portcullis-Verdict": verdict_to_str(result.verdict),
             "X-Portcullis-Score": f"{result.score:.6f}",
         }
+        if result.conversation_state is not None:
+            headers["X-Portcullis-Conversation-State"] = result.conversation_state.name.lower()
 
         if not body.stream:
             upstream_response = await proxy_dep.complete(payload)

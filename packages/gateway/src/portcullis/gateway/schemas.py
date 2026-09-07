@@ -16,15 +16,22 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from portcullis.core.l4 import ConversationState
 from portcullis.core.policy import Verdict
 
 VerdictStr = Literal["allow", "flag", "sanitise", "challenge", "block"]
+ConversationStateStr = Literal["normal", "probing", "establishing", "exploiting"]
 
 
 class DetectRequest(BaseModel):
     text: str = Field(min_length=1, max_length=100_000)
     scope: Literal["user", "system", "retrieved", "tool_result", "file"] = "user"
     shadow: bool = False
+    conversation_id: str | None = None
+    """Opt-in multi-turn tracking (L4, ADR-0008). Omitted (the default)
+    reproduces exactly Milestone 6's stateless behaviour - this field did
+    not exist then, and its absence now means nothing changes for an
+    existing caller."""
 
 
 class MatchedRule(BaseModel):
@@ -60,6 +67,7 @@ class DetectResponse(BaseModel):
     nearest_known_attack: str | None
     nearest_known_attack_family: str | None
     latency_ms: LatencyBreakdownModel
+    conversation_state: ConversationStateStr | None = None
 
 
 class BatchDetectRequest(BaseModel):
@@ -89,6 +97,11 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     temperature: float | None = None
     max_tokens: int | None = None
+    conversation_id: str | None = None
+    """Same opt-in L4 tracking as `DetectRequest.conversation_id` - not a
+    real OpenAI API field, but additive: a real OpenAI client that never
+    sets it is unaffected, and this field is stripped before the request is
+    forwarded upstream (proxy.py never sees it)."""
 
 
 class BlockedErrorDetail(BaseModel):
@@ -113,3 +126,15 @@ _VERDICT_TO_STR: dict[Verdict, VerdictStr] = {
 
 def verdict_to_str(verdict: Verdict) -> VerdictStr:
     return _VERDICT_TO_STR[verdict]
+
+
+_CONVERSATION_STATE_TO_STR: dict[ConversationState, ConversationStateStr] = {
+    ConversationState.NORMAL: "normal",
+    ConversationState.PROBING: "probing",
+    ConversationState.ESTABLISHING: "establishing",
+    ConversationState.EXPLOITING: "exploiting",
+}
+
+
+def conversation_state_to_str(state: ConversationState | None) -> ConversationStateStr | None:
+    return None if state is None else _CONVERSATION_STATE_TO_STR[state]

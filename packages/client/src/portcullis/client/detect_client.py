@@ -15,6 +15,18 @@ from pydantic import BaseModel
 Scope = Literal["user", "system", "retrieved", "tool_result", "file"]
 
 
+def _item(
+    text: str, scope: Scope, shadow: bool, conversation_id: str | None
+) -> dict[str, str | bool]:
+    """`conversation_id` is only included when set, not sent as an explicit
+    `null` - keeps the wire payload identical to pre-M7 callers who never
+    pass it (server-side default is also omitted/None either way)."""
+    item: dict[str, str | bool] = {"text": text, "scope": scope, "shadow": shadow}
+    if conversation_id is not None:
+        item["conversation_id"] = conversation_id
+    return item
+
+
 class MatchedRule(BaseModel):
     rule_id: str
     name: str
@@ -48,6 +60,7 @@ class DetectResult(BaseModel):
     nearest_known_attack: str | None
     nearest_known_attack_family: str | None
     latency_ms: LatencyBreakdown
+    conversation_state: Literal["normal", "probing", "establishing", "exploiting"] | None = None
 
 
 class DetectClient:
@@ -80,19 +93,29 @@ class DetectClient:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def detect(self, text: str, *, scope: Scope = "user", shadow: bool = False) -> DetectResult:
-        response = self._client.post(
-            "/v1/detect", json={"text": text, "scope": scope, "shadow": shadow}
-        )
+    def detect(
+        self,
+        text: str,
+        *,
+        scope: Scope = "user",
+        shadow: bool = False,
+        conversation_id: str | None = None,
+    ) -> DetectResult:
+        response = self._client.post("/v1/detect", json=_item(text, scope, shadow, conversation_id))
         response.raise_for_status()
         return DetectResult.model_validate(response.json())
 
     def detect_batch(
-        self, texts: list[str], *, scope: Scope = "user", shadow: bool = False
+        self,
+        texts: list[str],
+        *,
+        scope: Scope = "user",
+        shadow: bool = False,
+        conversation_id: str | None = None,
     ) -> list[DetectResult]:
         response = self._client.post(
             "/v1/detect/batch",
-            json={"items": [{"text": t, "scope": scope, "shadow": shadow} for t in texts]},
+            json={"items": [_item(t, scope, shadow, conversation_id) for t in texts]},
         )
         response.raise_for_status()
         return [DetectResult.model_validate(r) for r in response.json()["results"]]

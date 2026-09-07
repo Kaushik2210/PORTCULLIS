@@ -11,11 +11,12 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from portcullis.gateway.app import create_app
 from portcullis.gateway.config import GatewayConfig
+from portcullis.gateway.conversation import ConversationAwareDetector
 from portcullis.gateway.pipeline import DetectionPipeline
 from portcullis.gateway.proxy import UpstreamProxy
 
@@ -35,18 +36,27 @@ def _config() -> GatewayConfig:
         sanitise_threshold=0.4,
         challenge_threshold=0.6,
         block_threshold=0.8,
+        redis_url=None,
+        conversation_ttl_s=1800.0,
     )
 
 
 @pytest.fixture
 def client(
-    fake_pipeline: DetectionPipeline, mock_upstream_asgi_app: FastAPI
+    fake_pipeline: DetectionPipeline,
+    conversation_detector: ConversationAwareDetector,
+    mock_upstream_asgi_app: FastAPI,
 ) -> Iterator[TestClient]:
     proxy = UpstreamProxy(
         "http://mock-upstream",
         transport=httpx.ASGITransport(app=mock_upstream_asgi_app),
     )
-    app = create_app(config=_config(), pipeline=fake_pipeline, proxy=proxy)
+    app = create_app(
+        config=_config(),
+        pipeline=fake_pipeline,
+        proxy=proxy,
+        conversation_detector=conversation_detector,
+    )
     with TestClient(app) as c:
         yield c
 
@@ -160,3 +170,88 @@ def test_chat_completions_streams_via_sse(client: TestClient) -> None:
         body = "".join(response.iter_text())
     assert "data: [DONE]" in body
     assert "hello" in body
+
+
+def test_detect_without_conversation_id_reports_no_conversation_state(client: TestClient) -> None:
+    response = client.post("/v1/detect", json={"text": "please summarise this document"})
+    assert response.json()["conversation_state"] is None
+
+
+def test_a_topic_pivot_right_after_a_block_escalates_a_later_benign_turn(
+    client: TestClient, injection_marker: str
+) -> None:
+    """End-to-end proof of ADR-0008's whole premise: a turn that fusion
+    alone would allow gets escalated because of what happened earlier in
+    the *same* conversation. Turn 1 is blocked (marks the topic "TOPIC_A"
+    via the fake embedder, conftest.py); turn 2 is benign on its own but
+    pivots to an unrelated topic immediately after - L4's topic-pivot-
+    after-refusal signal should raise its floor to CHALLENGE."""
+    first = client.post(
+        "/v1/detect",
+        json={"text": f"{injection_marker} TOPIC_A", "conversation_id": "conv-1"},
+    )
+    assert first.json()["verdict"] == "block"
+
+    second = client.post(
+        "/v1/detect",
+        json={"text": "something totally unrelated", "conversation_id": "conv-1"},
+    )
+    body = second.json()
+    assert body["verdict"] == "challenge"
+    assert body["conversation_state"] == "exploiting"
+    assert "conversation state" in body["rationale"].lower()
+
+
+def test_conversation_state_does_not_leak_across_conversation_ids(
+    client: TestClient, injection_marker: str
+) -> None:
+    client.post(
+        "/v1/detect",
+        json={"text": f"{injection_marker} TOPIC_A", "conversation_id": "conv-a"},
+    )
+    response = client.post(
+        "/v1/detect",
+        json={"text": "something totally unrelated", "conversation_id": "conv-b"},
+    )
+    body = response.json()
+    assert body["verdict"] == "allow"
+    assert body["conversation_state"] == "normal"
+
+
+def test_chat_completions_conversation_id_is_not_forwarded_upstream(
+    fake_pipeline: DetectionPipeline, conversation_detector: ConversationAwareDetector
+) -> None:
+    """`mock_upstream`'s own schema happens to reuse `conversation_id` too
+    (schemas.py), so a plain "did the request succeed" check can't tell
+    forwarding apart from stripping - both would return 200. This spies on
+    the raw JSON the upstream actually received instead."""
+    received: dict[str, object] = {}
+
+    spy_app = FastAPI()
+
+    @spy_app.post("/v1/chat/completions")
+    async def _capture(request: Request) -> dict[str, object]:
+        received.update(await request.json())
+        return {"id": "x", "object": "chat.completion", "created": 0, "model": "m", "choices": []}
+
+    proxy = UpstreamProxy("http://spy", transport=httpx.ASGITransport(app=spy_app))
+    app = create_app(
+        config=_config(),
+        pipeline=fake_pipeline,
+        proxy=proxy,
+        conversation_detector=conversation_detector,
+    )
+    with TestClient(app) as c:
+        response = c.post(
+            "/v1/chat/completions",
+            json={
+                "model": "mock-llm",
+                "messages": [{"role": "user", "content": "hello there"}],
+                "stream": False,
+                "conversation_id": "conv-1",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "conversation_id" not in received
+    assert received["model"] == "mock-llm"
