@@ -114,6 +114,41 @@ def load_partition(data_dir: Path, name: str) -> list[TrainingExample]:
     return build_training_examples(binary_rows, weak_rows)
 
 
+def save_checkpoint(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    out_dir: Path,
+    *,
+    history: list[dict[str, float]],
+    max_seq_len: int,
+    epochs: int,
+    batch_size: int,
+) -> None:
+    """Writes a complete, loadable checkpoint - model, tokenizer, and the
+    config calibrate.py/export.py need to read it back correctly.
+
+    Called both mid-training (so an interrupted run leaves something usable
+    behind - a full run was lost this way once, mid-Milestone-4, when the
+    host session was torn down at step 150/501 with no checkpoint saved at
+    all) and at the end. An interim checkpoint is not "the final model," but
+    it is strictly better than nothing.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+    (out_dir / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
+    (out_dir / "taxonomy.json").write_text(json.dumps(list(TAXONOMY)), encoding="utf-8")
+    # Downstream steps (calibrate.py, export.py) must tokenize at the same
+    # max_seq_len the model was actually trained at, not the module default -
+    # this file's own MAX_SEQ_LEN constant is only the default, and Milestone
+    # 4's real run overrides it (128, not 256) for CPU throughput. Persisting
+    # it here is what lets those steps read the truth instead of assuming it.
+    (out_dir / "training_config.json").write_text(
+        json.dumps({"max_seq_len": max_seq_len, "epochs": epochs, "batch_size": batch_size}),
+        encoding="utf-8",
+    )
+
+
 def evaluate(
     model: PreTrainedModel,
     loader: DataLoader[dict[str, torch.Tensor]],
@@ -140,6 +175,7 @@ def train(
     log_every: int,
     max_seq_len: int = MAX_SEQ_LEN,
     max_train_rows: int | None = None,
+    checkpoint_every: int = 200,
 ) -> None:
     torch.manual_seed(0)
 
@@ -197,6 +233,18 @@ def train(
                 )
                 running_loss, seen = 0.0, 0
 
+            if checkpoint_every > 0 and step % checkpoint_every == 0:
+                save_checkpoint(
+                    model,
+                    tokenizer,
+                    out_dir,
+                    history=history,
+                    max_seq_len=max_seq_len,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                )
+                print(f"  interim checkpoint saved at epoch {epoch} step {step}", flush=True)
+
         val_loss = evaluate(model, val_loader)
         epoch_time = time.perf_counter() - epoch_start
         history.append({"epoch": epoch, "val_loss": val_loss, "epoch_seconds": epoch_time})
@@ -204,21 +252,16 @@ def train(
             f"epoch {epoch} done in {epoch_time:.0f}s - validation masked BCE: {val_loss:.4f}",
             flush=True,
         )
+        save_checkpoint(
+            model,
+            tokenizer,
+            out_dir,
+            history=history,
+            max_seq_len=max_seq_len,
+            epochs=epochs,
+            batch_size=batch_size,
+        )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(out_dir)
-    tokenizer.save_pretrained(out_dir)
-    (out_dir / "training_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-    (out_dir / "taxonomy.json").write_text(json.dumps(list(TAXONOMY)), encoding="utf-8")
-    # Downstream steps (calibrate.py, export.py) must tokenize at the same
-    # max_seq_len the model was actually trained at, not the module default -
-    # this file's own MAX_SEQ_LEN constant is only the default, and Milestone
-    # 4's real run overrides it (128, not 256) for CPU throughput. Persisting
-    # it here is what lets those steps read the truth instead of assuming it.
-    (out_dir / "training_config.json").write_text(
-        json.dumps({"max_seq_len": max_seq_len, "epochs": epochs, "batch_size": batch_size}),
-        encoding="utf-8",
-    )
     print(f"\nsaved checkpoint to {out_dir}", flush=True)
 
 
@@ -237,6 +280,14 @@ def main() -> int:
         default=None,
         help="Deterministically stride-sample train to this many rows (see train() docstring).",
     )
+    ap.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=200,
+        help="Save an interim checkpoint every N steps (0 disables). A full "
+        "run was lost once when its host session ended with no checkpoint "
+        "saved at all - this is the fix.",
+    )
     args = ap.parse_args()
     train(
         data_dir=args.data_dir,
@@ -247,6 +298,7 @@ def main() -> int:
         log_every=args.log_every,
         max_seq_len=args.max_seq_len,
         max_train_rows=args.max_train_rows,
+        checkpoint_every=args.checkpoint_every,
     )
     return 0
 
