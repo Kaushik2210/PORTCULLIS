@@ -1,0 +1,33 @@
+{
+  "fit_set": {
+    "partition": "validation",
+    "n": 790
+  },
+  "eval_set": {
+    "partition": "test",
+    "n": 3000,
+    "sampling": "deterministic stride"
+  },
+  "target_fpr": 0.01,
+  "fused": {
+    "tpr_at_target_fpr": 0.19183168316831684,
+    "auprc": 0.6400176815192121
+  },
+  "max_baseline": {
+    "tpr_at_target_fpr": 0.06188118811881188,
+    "auprc": 0.5448155573586315
+  },
+  "delta": {
+    "tpr": 0.12995049504950495,
+    "auprc": 0.0952021241605806
+  },
+  "weights": {
+    "intercept": -4.448447065116279,
+    "coef": {
+      "l0": 0.0090014190125105,
+      "l1": 2.250913752803587,
+      "l2": 6.415934405287984,
+      "knn": 1.5783295959242154
+    }
+  }
+}

@@ -24,9 +24,15 @@ lint:
 test:
     uv run pytest -q -m "not slow and not needs_infra and not needs_model"
 
-# Latency guards, run alone and serially so the numbers mean something.
+# Latency guards. Each slow test file runs as its own process, not just
+# serially within one: two tight CPU-bound loops back-to-back in the same
+# interpreter leave enough residual thermal/scheduler state on this hybrid
+# P/E-core machine (ADR-0002) to push the second guard's p95 over budget
+# even though each measures clean in isolation - found when the Tier A
+# guard flaked at Milestone 5 despite no L0/L1 code changing that milestone.
 test-perf:
-    uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model"
+    uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model" packages/core/tests/test_l0_properties.py
+    uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model" packages/core/tests/test_l1_rule_corpus.py
 
 # Everything CI runs, in CI order.
 check: lint test test-perf
@@ -78,6 +84,24 @@ export-l2:
 
 # The full M4 pipeline, in order.
 l2: weak-label train-l2 calibrate-l2 export-l2
+
+# --- M5: kNN sidecar + fusion + policy --------------------------------------
+
+KNN_INDEX_DIR := env_var('LOCALAPPDATA') / "portcullis" / "knn_index"
+
+# Embed the train-partition attack rows and save the kNN sidecar's index.
+# Brute-force numpy, not FAISS - ADR-0003's own measurement at this corpus
+# scale (6.8k rows) found sub-millisecond query latency with no ANN library.
+build-knn-index:
+    uv run --package portcullis-training python -m portcullis.training.knn.build_index --out-dir "{{KNN_INDEX_DIR}}"
+
+# Fit fusion (logistic regression, validation) and evaluate fusion-vs-max()
+# on a held-out test sample - the M5 checkpoint artifact.
+fit-fusion:
+    uv run --package portcullis-training python -m portcullis.training.fusion.fit --knn-index-dir "{{KNN_INDEX_DIR}}" --checkpoint-dir "{{L2_CHECKPOINT_DIR}}" --onnx-path "{{L2_MODEL_DIR}}/l2.int8.onnx" --out-dir "{{L2_CHECKPOINT_DIR}}"
+
+# The full M5 pipeline, in order. Assumes `just l2` has already run.
+m5: build-knn-index fit-fusion
 
 # --- evaluation ------------------------------------------------------------
 

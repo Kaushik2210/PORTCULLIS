@@ -10,6 +10,7 @@ dependencies = [
     "onnxruntime>=1.29",
     "portcullis-core",
     "scikit-learn>=1.5",
+    "sentence-transformers>=3.0",
     "torch>=2.6",
     "transformers>=4.48",
 ]

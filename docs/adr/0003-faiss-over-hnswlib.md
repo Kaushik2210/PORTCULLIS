@@ -1,6 +1,7 @@
 # ADR-0003 — FAISS for the kNN sidecar, not hnswlib
 
-**Status:** Accepted
+**Status:** Superseded at Milestone 5 — see resolution below. hnswlib remains correctly
+rejected; the actual Milestone 5 finding is that *neither* ANN library is needed yet.
 **Date:** Milestone 0
 
 ## Context
@@ -51,17 +52,46 @@ is a single matrix multiply and would be simpler than either library. Worth benc
 assuming an ANN index is needed at all — an honest possibility that this dependency is
 unnecessary. Deferred to Milestone 5, where the sidecar is actually built and the comparison
 can be measured rather than argued. **If brute force meets the budget, this ADR is superseded
-and the dependency is dropped.**
+and the dependency is dropped.** — **it did. See Resolution below.**
 
 **pgvector.** Already in the stack for the decision log. Rejected for this path: a network round
 trip inside the synchronous latency budget, to serve an index that fits comfortably in process
 memory.
 
+## Resolution at Milestone 5
+
+`faiss-cpu` was never installed. The sidecar's real corpus — 6,831 attack rows from the train
+partition, 384-dim MiniLM-L6 embeddings (the same checkpoint as L2, ADR-0005 — no second
+embedding model) — was benchmarked directly on this machine:
+
+| Method | Latency |
+|---|---:|
+| Brute-force, single query (numpy `@`, `argpartition` top-k) | 0.69ms |
+| Brute-force, batched (200 queries at once) | 0.26ms/query |
+
+Both are two to three orders of magnitude inside any latency tier this project defines (ADR-0002:
+Tier B < 25ms, Tier C < 150ms — and this is one component of one layer, not the whole cascade
+budget). `faiss-cpu`'s own per-query cost at this corpus size would not be measurably different
+— the win FAISS offers is sub-linear scaling as a corpus grows past what fits comfortably in a
+brute-force scan, and 6,831 vectors is nowhere near that regime.
+
+**Decision, superseding the one above:** the kNN sidecar (`packages/training/.../knn/index.py`)
+is a plain numpy `BruteForceIndex`. No FAISS, no hnswlib, no binary wheel dependency at all.
+This ADR's original packaging argument (hnswlib has no Windows/cp313 wheel) stays correct and is
+kept above for the record, but it turned out not to matter: the honest question — "is an ANN
+index needed at all?" — was the one worth asking, and measurement said no.
+
+**Reopening condition.** If the attack-corpus index grows by one to two orders of magnitude
+(hundreds of thousands of vectors) such that a fresh benchmark shows brute-force no longer fits
+comfortably inside its layer's latency budget, FAISS is the fallback already evaluated here —
+this ADR's original rationale for FAISS over hnswlib remains valid for that scenario.
+
 ## Consequences
 
-- The kNN sidecar depends on a binary wheel; CI must verify installation on the target platform,
-  not just on Linux.
-- `faiss-cpu` has no official type stubs. It will need an entry in the mypy override table, which
-  is a small, contained erosion of `--strict`.
-- The decision is revisitable and cheap to reverse: the sidecar sits behind an interface, so
-  swapping the index implementation touches one adapter.
+- No binary-wheel dependency for the kNN sidecar. CI does not need to verify a compiled
+  extension's installation on the target platform for this component.
+- The decision is cheap to reverse if the corpus grows: `BruteForceIndex` and a hypothetical
+  `FaissIndex` can share the same query interface, so swapping the backend touches one adapter,
+  not every caller.
+- `sentence-transformers` (already in the approved ML stack) is the one new runtime dependency
+  this milestone actually added, for embeddings — not an ANN library.
