@@ -85,6 +85,15 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["portcullis"]
 
+# FastAPI's dependency-injection idiom is `param: T = Depends(...)` - a
+# function call in a default argument, which B008 exists to catch as a
+# mutable-default footgun. It isn't one here: FastAPI calls Depends() once
+# per request via its own DI resolution, never reusing a shared mutable
+# default. Ruff's own docs name exactly this as the intended use of
+# extend-immutable-calls, rather than disabling B008 project-wide.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path"]
+
 # ---------------------------------------------------------------- mypy
 [tool.mypy]
 python_version = "3.13"

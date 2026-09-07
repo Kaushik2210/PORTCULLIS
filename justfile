@@ -24,6 +24,12 @@ lint:
 test:
     uv run pytest -q -m "not slow and not needs_infra and not needs_model"
 
+# Tests that need the real trained M4/M5 artifacts on disk (`just l2 m5`
+# first). Not part of `just check` - a fresh clone has no checkpoint yet,
+# and CI does not train one.
+test-model:
+    uv run pytest -q -m needs_model
+
 # Latency guards. Each slow test file runs as its own process, not just
 # serially within one: two tight CPU-bound loops back-to-back in the same
 # interpreter leave enough residual thermal/scheduler state on this hybrid
@@ -102,6 +108,26 @@ fit-fusion:
 
 # The full M5 pipeline, in order. Assumes `just l2` has already run.
 m5: build-knn-index fit-fusion
+
+# --- M6: gateway --------------------------------------------------------
+
+# The fake LLM backend the gateway proxies to by default (ADR-0007) - no
+# API key, no cost. Run this in one terminal, `just gateway-serve` in
+# another.
+gateway-mock-upstream:
+    uv run --package portcullis-gateway uvicorn portcullis.gateway.mock_upstream:app --port 8000
+
+# The real gateway, backed by the real M4/M5 checkpoint. Needs `just l2 m5`
+# to have already produced that checkpoint, and (by default) the mock
+# upstream running on port 8000 - override PORTCULLIS_UPSTREAM_BASE_URL to
+# point at a real provider instead.
+gateway-serve:
+    uv run --package portcullis-gateway uvicorn portcullis.gateway.app:app --port 8001
+
+# Milestone 6's checkpoint artifact: starts both servers itself, fires a
+# benign and an injection request at each, and prints the difference.
+demo-m6:
+    uv run --package portcullis-gateway python -m portcullis.gateway.demo
 
 # --- evaluation ------------------------------------------------------------
 
