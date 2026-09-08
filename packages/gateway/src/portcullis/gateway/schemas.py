@@ -115,6 +115,23 @@ class BlockedErrorResponse(BaseModel):
     error: BlockedErrorDetail
 
 
+class EgressBlockedErrorDetail(BaseModel):
+    """A confirmed canary leak (ADR-0009) - a different event from
+    `BlockedErrorDetail`, which is an input-side policy verdict. This one
+    carries no `DetectResponse`: a canary match is certainty, not a
+    calibrated probability, so there's no fusion score or policy rationale
+    to attach - only the fact of the leak and why it was recognised."""
+
+    message: str
+    type: Literal["portcullis_egress_block"] = "portcullis_egress_block"
+    code: Literal["canary_leak"] = "canary_leak"
+    rationale: str
+
+
+class EgressBlockedErrorResponse(BaseModel):
+    error: EgressBlockedErrorDetail
+
+
 _VERDICT_TO_STR: dict[Verdict, VerdictStr] = {
     Verdict.ALLOW: "allow",
     Verdict.FLAG: "flag",

@@ -142,6 +142,16 @@ demo-m6:
 demo-m7:
     uv run --package portcullis-gateway python -m portcullis.gateway.demo_m7
 
+# --- M8: egress inspection (L5) ----------------------------------------------
+
+# Milestone 8's checkpoint artifact: a live system-prompt-leak catch. The
+# mock upstream genuinely leaks its system prompt on the classic extraction
+# phrase; L5 catches the canary in PORTCULLIS's own response scan. Also
+# shows secret redaction (not a hard block) on a fake-AWS-key message.
+# Needs `just l2 m5` first.
+demo-m8:
+    uv run --package portcullis-gateway python -m portcullis.gateway.demo_m8
+
 # --- evaluation ------------------------------------------------------------
 
 # Regenerate every number in the README. Not yet implemented (Milestone 9).

@@ -25,6 +25,7 @@ from portcullis.core.policy import Verdict
 
 from .config import GatewayConfig
 from .conversation import ConversationAwareDetector, embed_fn_for
+from .egress import apply_scan_to_response, inject_canary, scan_and_relay_stream, scan_full_response
 from .pipeline import DetectionPipeline, DetectionResult
 from .proxy import UpstreamProxy
 from .redis_store import RedisConversationStore
@@ -36,6 +37,8 @@ from .schemas import (
     ChatCompletionRequest,
     DetectRequest,
     DetectResponse,
+    EgressBlockedErrorDetail,
+    EgressBlockedErrorResponse,
     HealthResponse,
     LatencyBreakdownModel,
     MatchedRule,
@@ -221,12 +224,41 @@ def create_app(
         if result.conversation_state is not None:
             headers["X-Portcullis-Conversation-State"] = result.conversation_state.name.lower()
 
+        # L5 egress inspection (M8, ADR-0009): a canary goes out in the
+        # system prompt on every request, and this same request's response
+        # is scanned for it plus secrets/exfiltration before the client
+        # sees it - independent of the input-side verdict above.
+        egress_payload, canary = inject_canary(payload)
+
         if not body.stream:
-            upstream_response = await proxy_dep.complete(payload)
+            upstream_response = await proxy_dep.complete(egress_payload)
+            egress_result = scan_full_response(upstream_response, canary=canary)
+
+            if egress_result.canary_leaked:
+                return JSONResponse(
+                    status_code=400,
+                    content=EgressBlockedErrorResponse(
+                        error=EgressBlockedErrorDetail(
+                            message=(
+                                "Response blocked by PORTCULLIS: confirmed system-prompt "
+                                "extraction detected in the model's reply."
+                            ),
+                            rationale=egress_result.findings[0].rationale,
+                        )
+                    ).model_dump(),
+                    headers=headers,
+                )
+
+            if egress_result.has_findings:
+                upstream_response = apply_scan_to_response(upstream_response, egress_result)
             return JSONResponse(content=upstream_response, headers=headers)
 
         return StreamingResponse(
-            proxy_dep.stream(payload), media_type="text/event-stream", headers=headers
+            scan_and_relay_stream(
+                proxy_dep.stream(egress_payload), canary=canary, model=body.model
+            ),
+            media_type="text/event-stream",
+            headers=headers,
         )
 
     return app
