@@ -3,7 +3,12 @@ name = "portcullis-eval"
 version = "0.1.0"
 description = "Evaluation harness, baselines, ablations, adaptive attacks"
 requires-python = ">=3.13"
-dependencies = ["portcullis-core"]
+dependencies = [
+    "portcullis-core",
+    "portcullis-training",
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
+]
 
 [build-system]
 requires = ["hatchling"]

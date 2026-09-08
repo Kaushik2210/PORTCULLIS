@@ -4,6 +4,7 @@ These are cheap, but each one encodes a mistake that is easy to make and
 annoying to diagnose later.
 """
 
+import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -57,19 +58,51 @@ def test_no_raw_corpora_committed() -> None:
     assert bad == [], f"unexpected tracked files under data/: {bad}"
 
 
-def test_readme_publishes_no_unearned_metrics() -> None:
+def test_readme_metrics_are_traceable_to_a_real_eval_run() -> None:
     """Guards the 'never fabricate a metric' rule mechanically.
 
-    Until `just eval` exists (Milestone 9), every headline metric cell must read
-    TBD. This fails loudly the moment someone hand-types a number into the
-    benchmark table, which is exactly the failure mode the rule exists to stop.
+    Before Milestone 9 this test required every headline cell to read TBD,
+    since `just eval` didn't exist yet. Milestone 9 built it, and the README
+    now carries real numbers - so the guard evolves rather than disappears:
+    every published number must be traceable to the real JSON `just eval`
+    produced, not hand-typed. This fails loudly the moment someone edits a
+    number in the README without it coming from a real eval-results.json -
+    exactly the failure mode the original TBD check existed to stop.
     """
+    results_path = REPO / "docs" / "benchmarks" / "eval-results.json"
+    assert results_path.exists(), "eval-results.json missing - run `just eval` first"
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+
     readme = (REPO / "README.md").read_text(encoding="utf-8")
-    table = [ln for ln in readme.splitlines() if ln.startswith("| **TPR @")]
-    assert table, "benchmark table rows not found - did the README structure change?"
-    for row in table:
-        cells = [c.strip() for c in row.split("|")[2:-1]]
-        assert all(c == "TBD" for c in cells), f"non-TBD metric published: {row}"
+    tpr_rows = [ln for ln in readme.splitlines() if ln.startswith("| **TPR @")]
+    assert len(tpr_rows) == 2, "expected exactly two TPR rows - did the README structure change?"
+    auprc_row = next(ln for ln in readme.splitlines() if ln.startswith("| AUPRC"))
+
+    def fmt(x: float) -> str:
+        return f"{x:.3f}"
+
+    for row, fpr_key, source in (
+        (tpr_rows[0], "tpr_at_fpr_0.100%", "headline"),
+        (tpr_rows[1], "tpr_at_fpr_1.0%", "headline"),
+    ):
+        stat = results[source][fpr_key]
+        for value in (stat["tpr"], stat["ci_low"], stat["ci_high"]):
+            assert fmt(value) in row, f"{fmt(value)} (from eval-results.json) missing in: {row}"
+
+    assert fmt(results["headline"]["auprc"]) in auprc_row, (
+        f"headline AUPRC missing from README's AUPRC row: {auprc_row}"
+    )
+
+    for baseline_key, fpr_key, row in (
+        ("max", "tpr_at_fpr_0.100%", tpr_rows[0]),
+        ("max", "tpr_at_fpr_1.0%", tpr_rows[1]),
+        ("regex_only", "tpr_at_fpr_0.100%", tpr_rows[0]),
+        ("regex_only", "tpr_at_fpr_1.0%", tpr_rows[1]),
+    ):
+        stat = results["baselines"][baseline_key][fpr_key]
+        assert fmt(stat["tpr"]) in row, (
+            f"{baseline_key} TPR ({fmt(stat['tpr'])}) missing from: {row}"
+        )
 
 
 def test_readme_does_not_report_balanced_accuracy() -> None:

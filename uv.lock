@@ -2004,11 +2004,19 @@ name = "portcullis-eval"
 version = "0.1.0"
 source = { editable = "packages/eval" }
 dependencies = [
+    { name = "numpy" },
     { name = "portcullis-core" },
+    { name = "portcullis-training" },
+    { name = "scikit-learn" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "portcullis-core", editable = "packages/core" }]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "portcullis-core", editable = "packages/core" },
+    { name = "portcullis-training", editable = "packages/training" },
+    { name = "scikit-learn", specifier = ">=1.5" },
+]
 
 [[package]]
 name = "portcullis-gateway"

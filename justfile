@@ -154,10 +154,12 @@ demo-m8:
 
 # --- evaluation ------------------------------------------------------------
 
-# Regenerate every number in the README. Not yet implemented (Milestone 9).
+# Milestone 9's checkpoint artifact: the real benchmark table. Scores the
+# full ~20k-row test set through the actually-deployed cascade, computes
+# headline TPR@FPR with bootstrap CIs, baselines, ablations, latency, and
+# adaptive-attacker results. Needs `just l2 m5` first. Takes several minutes.
 eval:
-    @echo "not implemented until Milestone 9 - README metrics remain TBD"
-    @exit 1
+    uv run --package portcullis-eval python -m portcullis.eval.harness
 
 # --- runtime ---------------------------------------------------------------
 
