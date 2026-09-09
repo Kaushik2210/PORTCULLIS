@@ -188,6 +188,21 @@ capability that adversary is modelled against. Once trained, every `just demo-m*
 | `just dashboard` | Start the dashboard's dev server (needs the gateway running separately) |
 | `just dashboard-check` | TypeScript strict + ESLint + Vitest — the frontend's `just check` |
 
+### Live dashboard demo
+
+**[kaushik2210.github.io/PORTCULLIS](https://kaushik2210.github.io/PORTCULLIS/)** — the
+dashboard's UI, deployed as a static export on GitHub Pages. This is the frontend only: there is
+no gateway behind it. It shows the real built pages (layout, empty states, the threshold
+explorer's UI) but the decision feed, inspector calls, and red-team numbers all need a live
+gateway to populate — run `just gateway-mock-upstream`, `just gateway-serve`, and `just eval`
+locally, point `NEXT_PUBLIC_GATEWAY_URL` at wherever your gateway is reachable, and rebuild.
+Nothing here is faked to look otherwise: an idle page with "Loading recent decisions..." is the
+honest state of a frontend with no backend, not a bug. Deliberately not deployed alongside it:
+the gateway itself, since that would mean hosting the trained checkpoint publicly — exactly the
+white-box access the threat model's adversary C is modelled against — and exposing a live
+detector to open probing, which the eval harness already measured losing 69% of the time to a
+generic black-box search.
+
 ---
 
 ## Lessons learned
