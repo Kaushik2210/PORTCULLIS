@@ -1,6 +1,7 @@
 # PORTCULLIS — Threat Model
 
-**Status:** draft, Milestone 0
+**Status:** living document, updated through Milestone 11 (real measurements folded in as they
+were produced — see §8 for what changed and when).
 **Scope:** the detection gateway itself and the LLM application it fronts.
 
 ---
@@ -93,10 +94,22 @@ This population is large, noisy, and easy. It should not be confused with a secu
 **Capability:** can query the deployed system repeatedly and observe verdicts. Iterates by hand
 or with a script. No access to weights or rules.
 **Motivation:** extract data, abuse tools, pivot to downstream systems.
-**Expected outcome:** L1 fails quickly — signatures are brittle under paraphrase by design.
-**L2 plus the kNN sidecar carry this case**, and **L4** catches the iteration itself: repeated
-probing is a stronger signal than any single probe. Rate limiting and decision logging are
-load-bearing here, not decoration.
+
+**Measured, not just modelled (Milestone 9).** This section originally predicted an outcome
+before any adversary had actually been run against the deployed system; that prediction has
+since been tested and needs correcting, not restated. A generic greedy hill-climbing search —
+four cheap mutation types, no attack-specific knowledge, an 8.45-query average against a
+100-query budget — evaded the deployed detector's block threshold **69% of the time**
+(`docs/benchmarks/eval-report.md`). L1 does fail quickly under this adversary as predicted, but
+**L2 plus the kNN sidecar do not "carry this case" the way this document originally claimed** -
+the measured evasion rate is high, not low, and is published here rather than smoothed over.
+What actually holds up: **L4** catches the *iteration itself* — the state machine's cumulative-
+risk signal is not defeated by any single mutated query scoring under threshold, since it
+accumulates across the very queries this attack needs to run (M7's own real finding: repeated
+boundary-testing pushed conversation state to `PROBING` while every individual turn stayed under
+the flag threshold). Rate limiting is named in the original architecture as a further mitigation
+against the *query volume* this adversary needs, but is not built (ADR-0008, ADR-0011) - a real,
+open gap against this specific adversary, not a decoration this document can claim credit for.
 
 ### C — Adaptive attacker, full white-box knowledge
 
@@ -207,7 +220,7 @@ squarely on this project's critical path.
 | **LLM06 Excessive Agency** | Policy engine gates consequential actions; the `CHALLENGE` verdict forces confirmation rather than silent execution. | Fusion / policy |
 | **LLM07 System Prompt Leakage** | **Canary tokens** — a unique high-entropy sentinel in the system prompt, scanned for in every response. A hit is a confirmed extraction with a zero false-positive rate. | L5 |
 | **LLM08 Vector and Embedding Weaknesses** | Retrieved content treated as untrusted, spotlighted, provenance-tagged, and scored at a stricter threshold. The embedding kNN sidecar is itself hardened against poisoning of the attack-family index. | L0–L2, indirect path |
-| **LLM10 Unbounded Consumption** | L3 adjudication is bounded to an uncertainty band with a measured traffic fraction; per-tenant rate limiting. | Fusion / policy |
+| **LLM10 Unbounded Consumption** | **Not addressed. Stated plainly, not glossed over.** The original architecture named two mitigations here - L3 adjudication bounded to an uncertainty band, and per-tenant rate limiting - and neither was built. L3 was cut as a deliberate scope decision (never had a milestone number; ADR-0007) rather than filling the gap silently, and rate limiting was named repeatedly as follow-up work (ADR-0008, ADR-0011) that never got its own milestone. A real, open gap, not a capability this document can claim. | — |
 
 LLM03 (Supply Chain), LLM04 (Data and Model Poisoning) and LLM09 (Misinformation) are
 acknowledged but not addressed by a runtime injection gateway; see section 5.
@@ -239,11 +252,31 @@ Stated here so a reviewer does not have to find them.
 7. **Detection is not authorization.** Restated because it is the one that matters. A deployment
    that grants an agent irreversible authority and relies on PORTCULLIS to decide when to use it
    has misunderstood the product.
+8. **A generic black-box search evades the deployed detector 69% of the time (Milestone 9,
+   measured against adversary B - §3B above).** The single most important number in this
+   document to not bury. Fusion's advantage over `max()` is real (~2.9x TPR at 1% FPR), but the
+   absolute detection rate at low false-positive operating points is low, and an unremarkable,
+   attack-agnostic query strategy beats it more often than not.
+9. **The regex-only baseline (L1 alone) matches or slightly beats the full learned fusion
+   system at low-FPR operating points (Milestone 9).** Ensemble diversity (adversary C's
+   mitigation, §3C) is real at the AUPRC level, but should not be oversold at the specific
+   operating point this project's own NFR-3 cares about most.
+10. **The kNN sidecar is ~85% of total cascade latency (Milestone 9), because it never received
+    the ONNX/INT8 optimisation L2 did.** A real-time deployment claim should account for this;
+    it is unresolved future work, not a solved problem this document should imply.
+11. **Unbounded consumption (LLM10) has no mitigation in this system** - see the OWASP mapping
+    above. Rate limiting and L3 adjudication were both named in the original architecture and
+    neither was built.
 
 ---
 
 ## 8. Revision history
 
-| Date | Change |
+| Milestone | Change |
 |---|---|
-| Milestone 0 | Initial draft. |
+| 0 | Initial draft. |
+| 6 | L3 (LLM adjudication) cut as a deliberate scope decision - never had a milestone number in the original spec's table (ADR-0007). Not yet reflected in this document at the time. |
+| 7 | L4 (conversation state machine) shipped for real - §3B's "L4 catches the iteration itself" became a real, tested claim rather than a design intention (ADR-0008). |
+| 8 | L5 (egress inspection) shipped for real - canary tokens, secret/PII scanning, exfiltration detection (ADR-0009). §2's canary-token claim and the LLM07/LLM02/LLM05 mapping rows became real, tested claims. |
+| 9 | **Full empirical correction pass.** The eval harness ran for real against the ~20k-row test set and the adaptive-attacker section (§3B, §7). Three findings folded in directly: the 69% black-box evasion rate, the regex-only-vs-fusion result, and the kNN latency finding. The LLM10 row and §3B's original "L2 plus kNN carry this case" claim were corrected rather than left standing once measurement contradicted them - this is the update that changed this document from aspirational to evidence-based. |
+| 11 | Status line changed from "draft, Milestone 0" to "living document" - the L3/LLM10 staleness this revision fixes is exactly the kind of thing a staff reviewer should not have to find themselves. |

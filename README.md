@@ -133,16 +133,19 @@ Read [`docs/threat-model.md`](docs/threat-model.md) before the code.
 ### OWASP LLM Top 10 (2025)
 
 Addresses LLM01 (Prompt Injection), LLM02 (Sensitive Information Disclosure), LLM05 (Improper
-Output Handling), LLM06 (Excessive Agency), **LLM07 (System Prompt Leakage)**, **LLM08 (Vector
-and Embedding Weaknesses)** and LLM10 (Unbounded Consumption). Full mapping with per-layer
-attribution is in the [threat model](docs/threat-model.md#6-owasp-llm-top-10-2025-mapping).
+Output Handling), LLM06 (Excessive Agency), **LLM07 (System Prompt Leakage)** and **LLM08
+(Vector and Embedding Weaknesses)**. **LLM10 (Unbounded Consumption) is explicitly not
+addressed** — the two mitigations the original architecture named for it (L3 adjudication, rate
+limiting) were both cut or never built, stated plainly rather than left as a stale claim. Full
+mapping with per-layer attribution, and the real Milestone 9 measurements against the adaptive
+adversary, are in the [threat model](docs/threat-model.md#6-owasp-llm-top-10-2025-mapping).
 
 ---
 
 ## Quickstart
 
-Requires Python 3.13+, [`uv`](https://docs.astral.sh/uv/), [`just`](https://just.systems/) and
-Docker.
+Requires Python 3.13+, [`uv`](https://docs.astral.sh/uv/), [`just`](https://just.systems/),
+Node 22+ (for the dashboard) and Docker.
 
 ```bash
 git clone https://github.com/Kaushik2210/PORTCULLIS.git && cd PORTCULLIS
@@ -150,11 +153,25 @@ just install
 just check
 ```
 
+**How long this actually takes, measured, not guessed.** `just install && just check` — the
+pure software path, no training — is a few minutes on ordinary hardware. A genuinely *working
+detector* needs a trained checkpoint, and that is not fast: `just l2` (fine-tune, calibrate,
+export L2) measured **~32 minutes** on this project's own CPU-only dev machine (M4), and
+`just m5` (build the kNN index, fit fusion) adds several more. **This project does not claim a
+five-minute path to a working detector, and does not publish trained weights to manufacture
+one** — partly because it would be dishonest given the real numbers above, and partly because
+the threat model (§3C) explicitly treats "an adversary with the detector's own weights" as a
+real, named adversary; shipping the weights to shave setup time would hand out exactly the
+capability that adversary is modelled against. Once trained, every `just demo-m*` and
+`just dashboard` command is real-time.
+
 | Command | What it does |
 |---|---|
 | `just check` | Lint, `mypy --strict`, and tests — the same gates as CI |
 | `just bench` | Re-measure the L2 latency frontier on your machine |
 | `just l2 && just m5` | Train/export L2 and fit fusion — produces the checkpoint the demos need |
+| `just gateway-mock-upstream` | Start the fake LLM backend the gateway proxies to by default (no API key, no cost) |
+| `just gateway-serve` | Start the real gateway (needs `just l2 m5` first) — pairs with `gateway-mock-upstream` above |
 | `just demo-m6` | The Milestone 6 checkpoint: starts the gateway and mock upstream, shows a swap |
 | `just demo-m7` | The Milestone 7 checkpoint: a real multi-turn conversation plus the crescendo algorithm |
 | `just demo-m8` | The Milestone 8 checkpoint: a live system-prompt-leak catch plus secret redaction |
@@ -163,6 +180,43 @@ just check
 | `just eval` | Regenerate the real benchmark table (~18 min) — headline, baselines, ablations, latency, adaptive attacks |
 | `just dashboard` | Start the dashboard's dev server (needs the gateway running separately) |
 | `just dashboard-check` | TypeScript strict + ESLint + Vitest — the frontend's `just check` |
+
+---
+
+## Lessons learned
+
+Real findings from building this across 11 milestones, not retrospective flattery.
+
+- **The same contention-contamination bug recurred four times** (ADR-0002's original latency
+  spike, M4's L2 training report, M5's fusion latency re-measurement, M10's dashboard
+  eval-scores re-run) and was caught freshly each time by comparing against the last clean run
+  before publishing, never by assuming a re-run is safe just because the code didn't change. A
+  hybrid P/E-core laptop under real background load produces numbers 3-11x worse than idle, and
+  nothing in the code or the test suite tells you that happened — only a diff against a prior
+  clean measurement does.
+- **The eval harness was the right thing to build, and it was uncomfortable in exactly the way
+  that means it worked.** A single accuracy number would have hidden that regex-only matches the
+  full learned system at low FPR, that removing the kNN sidecar from fusion improves the
+  headline metric, and that a generic black-box search evades the deployed detector 69% of the
+  time. All three are real, all three are published, and none of them would exist as findings if
+  the harness had been scoped to "compute the headline number and stop."
+- **Scope cuts made honestly compound.** L3 (LLM adjudication) was cut at M6 rather than papered
+  over, but two later documents (the OWASP mapping, this README) still claimed capability from
+  it until a deliberate re-read against the Definition of Done caught the drift. A cut recorded
+  once in an ADR does not stay correct everywhere it's referenced — every downstream claim needs
+  the same re-check, and staleness here is a documentation bug with the same severity as a code
+  bug, not a lesser one.
+- **An async test that hangs forever is a real bug in the test, not a flaky test to retry.** The
+  M10 SSE round-trip test deadlocked because Starlette's disconnect-detection races an in-process
+  ASGI transport in a way that only manifests for a generator that runs forever by design — a
+  `pytest-timeout` retry would have hidden a genuine, explainable interaction instead of
+  surfacing it. `asyncio.wait_for` plus reading the actual traceback found the real cause in
+  minutes; a longer timeout would have found nothing.
+- **Windows is a first-class target, not an afterthought, and it repeatedly changed the plan.**
+  FAISS over hnswlib (no prebuilt wheel), PowerShell 5.1's lack of `&&` and its per-line shell
+  invocation in `just` recipes, and the CI matrix running both OSes were all decided because this
+  project's own dev machine is Windows — none of them would have surfaced building on Linux only,
+  and a Linux-only CI would have shipped at least one of them broken.
 
 ---
 

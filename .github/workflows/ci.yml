@@ -51,10 +51,54 @@ jobs:
       - name: pytest (functional)
         run: uv run pytest -q -m "not slow and not needs_infra and not needs_model"
 
-      # Separate step, and deliberately so: a latency assertion measured while
-      # the property suite saturates the runner is measuring contention.
-      - name: pytest (latency guards)
-        run: uv run pytest -q -m "slow and not needs_infra and not needs_model"
+      # Two separate steps, each its own process - not one step running both
+      # files together. Found the hard way at Milestone 5: two CPU-bound
+      # latency guards back-to-back in the *same* interpreter leave enough
+      # residual thermal/scheduler state on a real machine to push the
+      # second one over budget, even though each measures clean alone (see
+      # justfile's test-perf recipe, which this mirrors exactly - CI had its
+      # own inline copy of the old, contamination-prone single-step version
+      # and needed the same fix, not just the local recipe).
+      - name: pytest (latency guard - L0)
+        run: uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model" packages/core/tests/test_l0_properties.py
+
+      - name: pytest (latency guard - L1)
+        run: uv run pytest -q -p no:randomly -m "slow and not needs_infra and not needs_model" packages/core/tests/test_l1_rule_corpus.py
+
+  dashboard:
+    name: dashboard (tsc + eslint + vitest)
+    runs-on: ubuntu-latest
+    # Single OS: unlike the kNN sidecar (ADR-0003), nothing here depends on
+    # a platform-specific binary wheel or native module.
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/dashboard
+        run: npm ci
+
+      - name: TypeScript (strict)
+        working-directory: apps/dashboard
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        working-directory: apps/dashboard
+        run: npm run lint
+
+      - name: Vitest
+        working-directory: apps/dashboard
+        run: npm test
+
+      - name: Production build
+        working-directory: apps/dashboard
+        run: npm run build
 
   compose:
     name: compose file validates
