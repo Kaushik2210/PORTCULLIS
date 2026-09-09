@@ -38,6 +38,9 @@ def _config() -> GatewayConfig:
         block_threshold=0.8,
         redis_url=None,
         conversation_ttl_s=1800.0,
+        eval_results_path=_UNUSED,
+        eval_scores_path=_UNUSED,
+        dashboard_origin="http://localhost:3000",
     )
 
 

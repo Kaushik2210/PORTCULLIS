@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from portcullis.core.l1 import Scope
@@ -25,7 +26,9 @@ from portcullis.core.policy import Verdict
 
 from .config import GatewayConfig
 from .conversation import ConversationAwareDetector, embed_fn_for
+from .decision_log import DecisionLog, DecisionLogEntryModel
 from .egress import apply_scan_to_response, inject_canary, scan_and_relay_stream, scan_full_response
+from .eval_data import EvalDataStore
 from .pipeline import DetectionPipeline, DetectionResult
 from .proxy import UpstreamProxy
 from .redis_store import RedisConversationStore
@@ -93,6 +96,20 @@ def _to_detect_response(result: DetectionResult) -> DetectResponse:
     )
 
 
+def _record_decision(request: Request, result: DetectionResult, *, source: str) -> None:
+    log: DecisionLog = request.app.state.decision_log
+    log.record(
+        text=result.text,
+        verdict=verdict_to_str(result.verdict),
+        enforced=result.enforced,
+        score=result.score,
+        taxonomy_labels=result.taxonomy_labels,
+        conversation_state=conversation_state_to_str(result.conversation_state),
+        latency_ms=result.latency.total_ms,
+        source=source,
+    )
+
+
 def get_conversation_detector(request: Request) -> ConversationAwareDetector:
     detector: ConversationAwareDetector | None = request.app.state.conversation_detector
     if detector is None:
@@ -142,10 +159,21 @@ def create_app(
         await app.state.proxy.aclose()
 
     app = FastAPI(title="PORTCULLIS gateway", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[resolved_config.dashboard_origin],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
     app.state.config = resolved_config
     app.state.pipeline = pipeline
     app.state.proxy = proxy
     app.state.conversation_detector = conversation_detector
+    app.state.decision_log = DecisionLog()
+    app.state.eval_data = EvalDataStore(
+        results_path=resolved_config.eval_results_path,
+        scores_path=resolved_config.eval_scores_path,
+    )
 
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz() -> HealthResponse:
@@ -159,6 +187,7 @@ def create_app(
 
     @app.post("/v1/detect", response_model=DetectResponse)
     async def detect(
+        request: Request,
         body: DetectRequest,
         conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
     ) -> DetectResponse:
@@ -168,28 +197,32 @@ def create_app(
             scope=_SCOPE_MAP[body.scope],
             shadow=body.shadow,
         )
+        _record_decision(request, result, source="detect")
         return _to_detect_response(result)
 
     @app.post("/v1/detect/batch", response_model=BatchDetectResponse)
     async def detect_batch(
+        request: Request,
         body: BatchDetectRequest,
         conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
     ) -> BatchDetectResponse:
-        results = tuple(
-            _to_detect_response(
-                conversation_dep.detect(
-                    item.text,
-                    conversation_id=item.conversation_id,
-                    scope=_SCOPE_MAP[item.scope],
-                    shadow=item.shadow,
-                )
+        detect_results = [
+            conversation_dep.detect(
+                item.text,
+                conversation_id=item.conversation_id,
+                scope=_SCOPE_MAP[item.scope],
+                shadow=item.shadow,
             )
             for item in body.items
-        )
+        ]
+        for result in detect_results:
+            _record_decision(request, result, source="detect_batch")
+        results = tuple(_to_detect_response(r) for r in detect_results)
         return BatchDetectResponse(results=results)
 
     @app.post("/v1/chat/completions")
     async def chat_completions(
+        request: Request,
         body: ChatCompletionRequest,
         conversation_dep: ConversationAwareDetector = Depends(get_conversation_detector),
         proxy_dep: UpstreamProxy = Depends(get_proxy),
@@ -201,6 +234,7 @@ def create_app(
             scope=Scope.USER,
             shadow=resolved_config.shadow_mode,
         )
+        _record_decision(request, result, source="chat_completions")
         detect_response = _to_detect_response(result)
 
         if result.enforced and result.verdict is Verdict.BLOCK:
@@ -260,6 +294,56 @@ def create_app(
             media_type="text/event-stream",
             headers=headers,
         )
+
+    @app.get("/v1/decisions/recent", response_model=list[DecisionLogEntryModel])
+    async def decisions_recent(request: Request, n: int = 50) -> list[DecisionLogEntryModel]:
+        log: DecisionLog = request.app.state.decision_log
+        return [DecisionLogEntryModel.from_entry(e) for e in log.recent(n)]
+
+    @app.get("/v1/decisions/stream")
+    async def decisions_stream(request: Request) -> StreamingResponse:
+        """Live traffic feed (M10, ADR-0011 Decision 1) - seeds with recent
+        history so a client that just connected sees something immediately,
+        then pushes every new decision as it happens."""
+        log: DecisionLog = request.app.state.decision_log
+        queue = log.subscribe()
+
+        async def _events() -> AsyncIterator[bytes]:
+            try:
+                for entry in log.recent(20):
+                    model = DecisionLogEntryModel.from_entry(entry)
+                    yield f"data: {model.model_dump_json()}\n\n".encode()
+                while True:
+                    entry = await queue.get()
+                    model = DecisionLogEntryModel.from_entry(entry)
+                    yield f"data: {model.model_dump_json()}\n\n".encode()
+            finally:
+                log.unsubscribe(queue)
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    @app.get("/v1/eval/scores")
+    async def eval_scores(request: Request) -> JSONResponse:
+        """Milestone 9's real per-row (label, score) pairs, for the
+        dashboard's threshold slider (ADR-0011, Decision 2)."""
+        store: EvalDataStore = request.app.state.eval_data
+        if store.scores is None:
+            raise HTTPException(
+                status_code=404, detail="eval-scores.json not found - run `just eval` first"
+            )
+        return JSONResponse(content=store.scores)
+
+    @app.get("/v1/eval/results")
+    async def eval_results(request: Request) -> JSONResponse:
+        """Milestone 9's real aggregate metrics, including the `remove_knn`
+        ablation the red-team console diffs against as its "second model
+        version" (ADR-0011, Decision 3)."""
+        store: EvalDataStore = request.app.state.eval_data
+        if store.results is None:
+            raise HTTPException(
+                status_code=404, detail="eval-results.json not found - run `just eval` first"
+            )
+        return JSONResponse(content=store.results)
 
     return app
 

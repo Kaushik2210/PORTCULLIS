@@ -32,6 +32,9 @@ class GatewayConfig:
     block_threshold: float
     redis_url: str | None
     conversation_ttl_s: float
+    eval_results_path: Path
+    eval_scores_path: Path
+    dashboard_origin: str
 
     @classmethod
     def from_env(cls) -> GatewayConfig:
@@ -75,4 +78,19 @@ class GatewayConfig:
             # to opt into the Redis-backed store (ADR-0008, Decision 4).
             redis_url=os.environ.get("PORTCULLIS_REDIS_URL"),
             conversation_ttl_s=float(os.environ.get("PORTCULLIS_CONVERSATION_TTL_S", "1800")),
+            # Milestone 9's real artifacts (ADR-0011, Decisions 2-3) - the
+            # dashboard's threshold slider and red-team console read these
+            # via the gateway rather than the frontend bundling stale data.
+            # Missing at startup degrades to 404 on the /v1/eval/* routes,
+            # not a crash: a fresh clone hasn't run `just eval` yet.
+            eval_results_path=Path(
+                os.environ.get("PORTCULLIS_EVAL_RESULTS_PATH", "docs/benchmarks/eval-results.json")
+            ),
+            eval_scores_path=Path(
+                os.environ.get("PORTCULLIS_EVAL_SCORES_PATH", "docs/benchmarks/eval-scores.json")
+            ),
+            # The dashboard (Next.js dev server) is a different origin from
+            # the gateway - CORS must name it explicitly rather than "*",
+            # since the gateway also handles real request/response bodies.
+            dashboard_origin=os.environ.get("PORTCULLIS_DASHBOARD_ORIGIN", "http://localhost:3000"),
         )

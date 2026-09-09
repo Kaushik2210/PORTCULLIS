@@ -124,6 +124,7 @@ def run(
     val_features = val_scored.feature_matrix()
     val_labels = val_scored.labels
     ablations: dict[str, object] = {}
+    ablation_scores: dict[str, np.ndarray] = {}
     for name, include in (
         ("remove_l0", ("l1", "l2", "knn")),
         ("remove_knn", ("l0", "l1", "l2")),
@@ -131,6 +132,7 @@ def run(
         weights = fit_fusion_variant(val_features, val_labels, include=include)
         scores = np.array([fuse(row.scores, weights).score for row in test_scored.rows])
         ablations[name] = {"coef": weights.coef, **_bootstrap_report(y_test, scores)}
+        ablation_scores[name] = scores
 
     print(f"measuring full-cascade latency (n={LATENCY_SAMPLE_SIZE}, unbatched)", flush=True)
     rng = random.Random(0)  # noqa: S311 - sampling for a latency measurement, not cryptography
@@ -199,6 +201,20 @@ def run(
     out_path = out_dir / "eval-results.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"wrote {out_path}", flush=True)
+
+    # Milestone 10's dashboard needs per-row (label, score) pairs, not just
+    # the aggregate metrics above - the threshold slider recomputes a
+    # confusion matrix client-side from these, and the red-team console's
+    # "diff two model versions" reuses remove_knn as the second version
+    # (ADR-0011, Decisions 2 and 3) rather than a second trained checkpoint.
+    scores_out = {
+        "labels": y_test.tolist(),
+        "fusion": fused_scores.tolist(),
+        "remove_knn": ablation_scores["remove_knn"].tolist(),
+    }
+    scores_path = out_dir / "eval-scores.json"
+    scores_path.write_text(json.dumps(scores_out), encoding="utf-8")
+    print(f"wrote {scores_path}", flush=True)
     print(f"total elapsed: {report['elapsed_s']:.1f}s", flush=True)
 
 

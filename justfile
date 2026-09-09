@@ -152,6 +152,25 @@ demo-m7:
 demo-m8:
     uv run --package portcullis-gateway python -m portcullis.gateway.demo_m8
 
+# --- M10: dashboard ----------------------------------------------------------
+
+# The dashboard's dev server (Next.js). Needs the gateway running separately
+# (just gateway-serve, or one of the demo-m6/7/8 recipes) for its API calls
+# to resolve - NEXT_PUBLIC_GATEWAY_URL overrides the default localhost:8001.
+dashboard:
+    cd apps/dashboard; npm run dev
+
+# TypeScript strict + ESLint + Vitest - the frontend's equivalent of
+# mypy --strict, ruff and pytest. `cd` repeated on every line, not chained
+# with && or relied on to persist: this justfile's windows-shell is
+# powershell.exe 5.1 (no && support), and each recipe line runs as its own
+# separate powershell.exe invocation - a `cd` on one line does not carry
+# over to the next.
+dashboard-check:
+    cd apps/dashboard; npx tsc --noEmit
+    cd apps/dashboard; npm run lint
+    cd apps/dashboard; npm test
+
 # --- evaluation ------------------------------------------------------------
 
 # Milestone 9's checkpoint artifact: the real benchmark table. Scores the
